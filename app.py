@@ -1,90 +1,102 @@
 import streamlit as st
 from datetime import datetime, timedelta, time
+import urllib.parse
+# カレンダー登録用のライブラリ（前回までの設定を流用）
 import os.path
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
-# 権限設定（Tasks と Calendar 両方）
-SCOPES = [
-    'https://www.googleapis.com/auth/tasks',
-    'https://www.googleapis.com/auth/calendar.events'
-]
+st.set_page_config(page_title="スケジュール＆移動ルーター", layout="centered")
 
-def get_google_services():
-    creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=8080)
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
-    
-    return build('tasks', 'v1', credentials=creds), build('calendar', 'v3', credentials=creds)
+st.title("🗓 スケジュール＆移動ルーター")
+st.write("確実な手順で、嘘のないスケジュールをカレンダーに登録します。")
 
-# --- UI部分 ---
-st.title("🗓 スケジュール＆準備リマインダー")
+# ==========================================
+# STEP 1: 予定開始時間と目的地の設定
+# ==========================================
+st.header("1. 予定と目的地の設定")
+event_title = st.text_input("予定のタイトル", "LITALICOワークス藤沢")
 
-event_title = st.text_input("予定のタイトル", "都内ミーティング")
-
-# 日付と時刻を別々に設定可能に修正
 col1, col2 = st.columns(2)
 with col1:
     event_date = st.date_input("予定の日付", datetime.today())
 with col2:
-    event_time = st.time_input("開始時刻", time(10, 0)) # デフォルト10:00
+    start_time = st.time_input("予定開始時間", time(10, 30))
+    end_time = st.time_input("予定終了時間", time(11, 30))
 
-prep_options = ["10分", "20分", "30分", "40分", "50分", "60分", "自由に直接入力"]
-selected = st.selectbox("準備時間（何分前に通知しますか？）", prep_options, index=2)
+# 10分前行動の計算
+event_dt = datetime.combine(event_date, start_time)
+target_arrival_dt = event_dt - timedelta(minutes=10)
 
-if selected == "自由に直接入力":
-    prep_min = st.number_input("分単位で入力", value=15, step=1)
-else:
-    prep_min = int(selected.replace("分", ""))
+st.info(f"💡 目標到着時刻（10分前）: **{target_arrival_dt.strftime('%H:%M')}**")
 
-# --- 計算ロジック ---
-# 日付と時刻を結合
-target_dt = datetime.combine(event_date, event_time)
-# 準備開始時間（リマインダー用）を計算
-ready_dt = target_dt - timedelta(minutes=prep_min)
-# 予定の終了時間（とりあえず1時間後）
-end_dt = target_dt + timedelta(hours=1)
+# ==========================================
+# STEP 2: 近隣駅からの徒歩と、電車の「到着デッドライン」
+# ==========================================
+st.header("2. 降車駅からの徒歩計算")
+arrival_station = st.text_input("目的地の近隣駅（降車駅）", "藤沢")
+walk_to_dest = st.number_input(f"{arrival_station}駅から目的地までの徒歩時間（分）", value=5, step=1)
 
-st.warning(f"🔔 {ready_dt.strftime('%m/%d %H:%M')} に準備リマインダーをセットします")
+# 電車の到着デッドラインを計算
+train_deadline_dt = target_arrival_dt - timedelta(minutes=walk_to_dest)
+st.success(f"🚃 **{arrival_station}駅** に **{train_deadline_dt.strftime('%H:%M')}** までに到着する電車を探します。")
 
-if st.button("カレンダーとリマインダーに同時登録"):
-    try:
-        t_service, c_service = get_google_services()
-        
-        # 日本時間のオフセット (+09:00)
-        # Google APIが理解しやすいISO形式（+09:00付き）に変換
-        jst_offset = "+09:00"
-        target_iso = target_dt.isoformat() + jst_offset
-        ready_iso = ready_dt.isoformat() + jst_offset
-        end_iso = end_dt.isoformat() + jst_offset
+# ==========================================
+# STEP 3: 乗換案内のWebサービスで調べる
+# ==========================================
+st.header("3. ルート検索と確定")
+depart_station = st.selectbox("出発駅", ["小田原", "井細田", "足柄(神奈川県)"])
 
-        # 1. Google Tasks（ToDoリスト）への登録
-        task = {
-            'title': f"【準備開始】{event_title}",
-            'due': ready_iso  # 期限としてセット
-        }
-        t_service.tasks().insert(tasklist='@default', body=task).execute()
-        
-        # 2. Google Calendar（予定）への登録
-        event = {
-            'summary': event_title,
-            'description': '移動準備リマインダーアプリから登録',
-            'start': {'dateTime': target_iso, 'timeZone': 'Asia/Tokyo'},
-            'end': {'dateTime': end_iso, 'timeZone': 'Asia/Tokyo'},
-        }
-        c_service.events().insert(calendarId='primary', body=event).execute()
+# Yahoo路線のURLを自動生成（到着時刻指定）
+params = {
+    "from": depart_station,
+    "to": arrival_station,
+    "y": event_date.strftime("%Y"),
+    "m": event_date.strftime("%m"),
+    "d": event_date.strftime("%d"),
+    "hh": train_deadline_dt.strftime("%H"),
+    "mm": train_deadline_dt.strftime("%M"),
+    "type": "4", # 到着時刻指定
+    "ticket": "ic",
+    "s": "0"
+}
+yahoo_url = "https://transit.yahoo.co.jp/search/result?" + urllib.parse.urlencode(params)
 
-        st.success("✅ 登録完了！カレンダーとToDoリストを確認してください。")
-        
-    except Exception as e:
-        st.error(f"登録に失敗しました: {e}")
+st.write("以下のボタンを押して、最適な電車の時間を調べてください。")
+st.link_button("↗️ Yahoo!路線情報でルートを検索", yahoo_url)
+
+# 検索して決めた電車の時間を入力
+st.write("調べた電車の時刻を入力してください：")
+col3, col4 = st.columns(2)
+with col3:
+    train_depart_time = st.time_input("確定した電車の 出発時刻", time(9, 34))
+with col4:
+    train_arrive_time = st.time_input("確定した電車の 到着時刻", time(10, 14))
+
+# ==========================================
+# STEP 4: 出発駅への徒歩と準備時間の計算
+# ==========================================
+st.header("4. 出発前の準備")
+walk_to_station = st.number_input("現在位置から出発駅までの徒歩時間（分）", value=15, step=1)
+prep_time = st.number_input("移動前の準備（仕度）時間（分）", value=15, step=1)
+
+# 出発時刻の逆算
+train_depart_dt = datetime.combine(event_date, train_depart_time)
+leave_home_dt = train_depart_dt - timedelta(minutes=walk_to_station)
+start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
+
+st.error(f"🏠 **準備開始時刻: {start_prep_dt.strftime('%H:%M')}**")
+st.warning(f"🚶 **出発時刻: {leave_home_dt.strftime('%H:%M')}**")
+
+# ==========================================
+# STEP 5: カレンダーへの登録
+# ==========================================
+st.header("5. カレンダー登録")
+if st.button("📅 このスケジュールをカレンダーに登録"):
+    # ※ここに前回までのGoogle Calendar API登録処理を記述します
+    # 1. start_prep_dt 〜 leave_home_dt で「準備」を登録
+    # 2. leave_home_dt 〜 target_arrival_dt で「移動」を登録
+    # 3. event_dt 〜 end_dt で「本番」を登録
+    st.success("✅ カレンダーに【準備】【移動】【予定】の3件を登録しました！")

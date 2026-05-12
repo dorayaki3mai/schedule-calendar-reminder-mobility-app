@@ -168,82 +168,82 @@ st.write("---")
 
 # --- 出発駅候補リストの設定 ---
 st.write("▼ 出発駅の候補リスト")
-st.caption("【使い方】「削除」にチェックを入れて下のボタンを押すと一括削除できます。")
 
 # 1. 履歴管理用の初期化
 if "station_history" not in st.session_state:
     st.session_state.station_history = []
 
 if "station_df" not in st.session_state:
-    # 初期表示の列順：順番, 出発駅名, 削除
+    # 削除用チェックボックスのカラムを廃止し、シンプル化
     st.session_state.station_df = pd.DataFrame([
-        {"順番": 1, "出発駅名": "井細田", "削除": False},
-        {"順番": 2, "出発駅名": "足柄(神奈川県)", "削除": False},
-        {"順番": 3, "出発駅名": "小田原", "削除": False}
+        {"順番": 1, "出発駅名": "井細田"},
+        {"順番": 2, "出発駅名": "足柄(神奈川県)"},
+        {"順番": 3, "出発駅名": "小田原"}
     ])
 
-# 2. 履歴保存関数（★ここでタイムゾーンと日付を適用）
+# 2. 履歴保存関数（設定されたタイムゾーン適用）
 def save_to_history():
     snapshot = st.session_state.station_df.copy()
-    # app_tz（設定したタイムゾーン）を適用し、日付と時間の形式で取得
     timestamp = datetime.now(app_tz).strftime("%Y/%m/%d %H:%M:%S")
     st.session_state.station_history.insert(0, {"time": timestamp, "data": snapshot})
     if len(st.session_state.station_history) > 5:
         st.session_state.station_history = st.session_state.station_history[:5]
 
-# 3. データエディタの表示（列の順番を制御）
-edited_stations = st.data_editor(
-    st.session_state.station_df,
-    num_rows="dynamic",
-    use_container_width=True,
-    hide_index=True,
-    column_order=("順番", "出発駅名", "削除"),
-    column_config={
-        "順番": st.column_config.NumberColumn("順", width=60, min_value=1, format="%d"),
-        "出発駅名": st.column_config.TextColumn("🚉 出発駅名", required=True),
-        "削除": st.column_config.CheckboxColumn("削除", width="small"),
-    },
-    key="station_editor"
-)
-
-# 4. 削除・整列ボタン
-col_btn1, col_btn2 = st.columns([1, 1])
-with col_btn1:
-    if st.button("🗑️ チェックした駅をリストから削除", use_container_width=True):
-        if edited_stations["削除"].any():
+# 3. 新規駅の追加UI（スマホ向け）
+st.caption("💡 新しい駅を追加する場合は入力してボタンを押してください。")
+col_add_input, col_add_btn = st.columns([3, 1])
+with col_add_input:
+    new_station_name = st.text_input("駅名を入力", key="new_station_input", label_visibility="collapsed", placeholder="例：箱根板橋")
+with col_add_btn:
+    if st.button("➕ 追加", use_container_width=True):
+        if new_station_name.strip() != "":
             save_to_history()
-            new_df = edited_stations[edited_stations["削除"] == False].copy()
-            st.session_state.station_df = new_df
+            new_order = len(st.session_state.station_df) + 1
+            new_row = pd.DataFrame([{"順番": new_order, "出発駅名": new_station_name.strip()}])
+            st.session_state.station_df = pd.concat([st.session_state.station_df, new_row], ignore_index=True)
             st.rerun()
 
-with col_btn2:
-    if st.button("🔢 リストの順番を1から振り直す", use_container_width=True):
-        save_to_history()
-        sorted_df = edited_stations.sort_values("順番").reset_index(drop=True)
-        sorted_df["順番"] = range(1, len(sorted_df) + 1)
-        sorted_df["削除"] = False
-        st.session_state.station_df = sorted_df
-        st.rerun()
+st.write("---")
 
-# 5. 復元機能
+# 4. リストの表示と個別削除ボタン（スマホ向けUI）
+for idx, row in st.session_state.station_df.iterrows():
+    # スマホで押しやすいように、ボタンの幅を調整（縦位置を中央に揃える）
+    col_num, col_name, col_del = st.columns([1, 4, 2], vertical_alignment="center")
+    
+    with col_num:
+        st.markdown(f"**{row['順番']}**")
+    with col_name:
+        st.markdown(f"**{row['出発駅名']}**")
+    with col_del:
+        # keyにidxを含めることで、各行のボタンを独立させる
+        if st.button("🗑️ 削除", key=f"del_sta_{idx}", use_container_width=True):
+            save_to_history()
+            # 該当の行を削除
+            st.session_state.station_df = st.session_state.station_df.drop(idx).reset_index(drop=True)
+            # 削除後、順番を自動で1から振り直す
+            st.session_state.station_df["順番"] = range(1, len(st.session_state.station_df) + 1)
+            st.rerun()
+
+st.write("---")
+
+# 5. 履歴の復元・削除機能（スマホ向けUI）
 if st.session_state.station_history:
-    with st.expander("⏪ 変更履歴から復元（直近5件・タイムスタンプ付）"):
-        history_labels = [f"{i+1}: {h['time']} の状態に戻す" for i, h in enumerate(st.session_state.station_history)]
-        selected_label = st.radio("どの時点に戻しますか？", history_labels)
-        if st.button("選択した履歴を復元する"):
-            idx = history_labels.index(selected_label)
-            st.session_state.station_df = st.session_state.station_history[idx]["data"]
-            st.rerun()
-
-# 自動連番ロジック
-if len(edited_stations) > len(st.session_state.station_df):
-    last_order = edited_stations["順番"].max() if not edited_stations.empty else 0
-    edited_stations["順番"] = edited_stations["順番"].fillna(last_order + 1)
-    edited_stations["削除"] = edited_stations["削除"].fillna(False)
-    st.session_state.station_df = edited_stations
-    st.rerun()
-else:
-    st.session_state.station_df = edited_stations
+    with st.expander("⏪ 変更履歴の管理（直近5件）"):
+        for i, h in enumerate(st.session_state.station_history):
+            st.markdown(f"**{i+1}: {h['time']} の状態**")
+            
+            # 各履歴ごとにボタンを横並びで配置
+            col_res, col_del = st.columns(2)
+            with col_res:
+                if st.button("⏪ 復元", key=f"hist_res_{i}", use_container_width=True):
+                    st.session_state.station_df = h["data"]
+                    st.rerun()
+            with col_del:
+                if st.button("🗑️ 削除", key=f"hist_del_{i}", use_container_width=True):
+                    st.session_state.station_history.pop(i)
+                    st.rerun()
+            # 履歴と履歴の間に見やすい区切り線を入れる
+            st.divider() 
 
 # 出発駅の選択
 valid_stations = [s for s in st.session_state.station_df["出発駅名"].tolist() if s and str(s).strip() != ""]

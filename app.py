@@ -42,6 +42,30 @@ def clean_address(addr):
     addr = re.sub(r'([0-9０-９]+[-ー][0-9０-９]+[-ー][0-9０-９]+|[0-9０-９]+[-ー][0-9０-９]+|[0-9０-９]+丁目[0-9０-９]+番[0-9０-９]+号?).*$', r'\1', addr)
     return addr
 
+# --- 時間連動用の初期設定 (Session State) ---
+if "s_h" not in st.session_state:
+    st.session_state.s_h = now_with_tz.hour
+    st.session_state.s_m = now_with_tz.minute
+    # 終了時間は開始の1時間後
+    end_init = now_with_tz + timedelta(hours=1)
+    st.session_state.e_h = end_init.hour
+    st.session_state.e_m = end_init.minute
+    
+if "td_h" not in st.session_state:
+    st.session_state.td_h = now_with_tz.hour
+    st.session_state.td_m = now_with_tz.minute
+    st.session_state.ta_h = now_with_tz.hour
+    st.session_state.ta_m = now_with_tz.minute
+
+# --- 連動用関数 ---
+def sync_start_to_end():
+    st.session_state.e_h = st.session_state.s_h
+    st.session_state.e_m = st.session_state.s_m
+
+def sync_train_to_arrive():
+    st.session_state.ta_h = st.session_state.td_h
+    st.session_state.ta_m = st.session_state.td_m
+
 # ==========================================
 # STEP 1: 予定開始時間と目的地の設定
 # ==========================================
@@ -96,20 +120,33 @@ if event_address_full:
 st.write("---")
 event_date = st.date_input("予定の日付", datetime.today())
 
+# --- 現在時刻と1時間後の計算 ---
+now_h = now_with_tz.hour
+now_m = now_with_tz.minute
+
+end_dt = now_with_tz + timedelta(hours=1)
+end_h = end_dt.hour
+end_m = end_dt.minute
+# ------------------------------
+
 st.write("🕒 **予定開始時間**")
 col_s_h, col_s_m = st.columns(2)
 with col_s_h:
-    start_hour = st.selectbox("開始（時）", [f"{i:02d}" for i in range(24)], index=10)
+    # indexに現在時刻の「時(now_h)」を指定
+    start_hour = st.selectbox("開始（時）", [f"{i:02d}" for i in range(24)], index=now_h)
 with col_s_m:
-    start_minute = st.selectbox("開始（分）", [f"{i:02d}" for i in range(60)], index=30)
+    # indexに現在時刻の「分(now_m)」を指定
+    start_minute = st.selectbox("開始（分）", [f"{i:02d}" for i in range(60)], index=now_m)
 start_time = time(int(start_hour), int(start_minute))
 
 st.write("🕒 **予定終了時間**")
 col_e_h, col_e_m = st.columns(2)
 with col_e_h:
-    end_hour = st.selectbox("終了（時）", [f"{i:02d}" for i in range(24)], index=11)
+    # indexに1時間後の「時(end_h)」を指定
+    end_hour = st.selectbox("終了（時）", [f"{i:02d}" for i in range(24)], index=end_h)
 with col_e_m:
-    end_minute = st.selectbox("終了（分）", [f"{i:02d}" for i in range(60)], index=30)
+    # indexに1時間後の「分(end_m)」を指定
+    end_minute = st.selectbox("終了（分）", [f"{i:02d}" for i in range(60)], index=end_m)
 end_time = time(int(end_hour), int(end_minute))
 
 st.write("---")
@@ -269,19 +306,22 @@ st.write("▼ 調べた電車の時刻を入力してください")
 st.write("🚃 **確定した電車の 出発時刻**")
 col_td_h, col_td_m = st.columns(2)
 with col_td_h:
-    train_depart_hour = st.selectbox("出発（時）", [f"{i:02d}" for i in range(24)], index=9)
+    # ここも現在時刻（now_h）を初期値に
+    train_depart_hour = st.selectbox("出発（時）", [f"{i:02d}" for i in range(24)], index=now_h)
 with col_td_m:
-    train_depart_minute = st.selectbox("出発（分）", [f"{i:02d}" for i in range(60)], index=34)
+    # 現在時刻（now_m）を初期値に
+    train_depart_minute = st.selectbox("出発（分）", [f"{i:02d}" for i in range(60)], index=now_m)
 train_depart_time = time(int(train_depart_hour), int(train_depart_minute))
 
 st.write("🚃 **確定した電車の 到着時刻**")
 col_ta_h, col_ta_m = st.columns(2)
 with col_ta_h:
-    train_arrive_hour = st.selectbox("到着（時）", [f"{i:02d}" for i in range(24)], index=10)
+    # 同様に現在時刻（now_h）を初期値に
+    train_arrive_hour = st.selectbox("到着（時）", [f"{i:02d}" for i in range(24)], index=now_h)
 with col_ta_m:
-    train_arrive_minute = st.selectbox("到着（分）", [f"{i:02d}" for i in range(60)], index=14)
+    # 現在時刻（now_m）を初期値に
+    train_arrive_minute = st.selectbox("到着（分）", [f"{i:02d}" for i in range(60)], index=now_m)
 train_arrive_time = time(int(train_arrive_hour), int(train_arrive_minute))
-
 
 # ==========================================
 # STEP 4: 出発前の準備

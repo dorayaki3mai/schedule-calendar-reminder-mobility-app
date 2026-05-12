@@ -1,4 +1,5 @@
 import streamlit as st
+import json
 from datetime import datetime, timedelta, time
 import urllib.parse
 # カレンダー登録用のライブラリ（前回までの設定を流用）
@@ -91,12 +92,61 @@ st.error(f"🏠 **準備開始時刻: {start_prep_dt.strftime('%H:%M')}**")
 st.warning(f"🚶 **出発時刻: {leave_home_dt.strftime('%H:%M')}**")
 
 # ==========================================
-# STEP 5: カレンダーへの登録
+# STEP 5: カレンダーへの登録（本番クラウド対応版）
 # ==========================================
 st.header("5. カレンダー登録")
+
+# 終了時刻のデータ（datetime型）を作成
+end_dt = datetime.combine(event_date, end_time)
+
 if st.button("📅 このスケジュールをカレンダーに登録"):
-    # ※ここに前回までのGoogle Calendar API登録処理を記述します
-    # 1. start_prep_dt 〜 leave_home_dt で「準備」を登録
-    # 2. leave_home_dt 〜 target_arrival_dt で「移動」を登録
-    # 3. event_dt 〜 end_dt で「本番」を登録
-    st.success("✅ カレンダーに【準備】【移動】【予定】の3件を登録しました！")
+    try:
+        with st.spinner("Googleカレンダーに通信中..."):
+            SCOPES = ['https://www.googleapis.com/auth/calendar']
+            creds = None
+            
+            # 1. StreamlitのSecrets（金庫）から鍵を読み込む
+            if "GOOGLE_TOKEN_JSON" in st.secrets:
+                token_info = json.loads(st.secrets["GOOGLE_TOKEN_JSON"])
+                creds = Credentials.from_authorized_user_info(token_info, SCOPES)
+            
+            # 2. 鍵が期限切れなどで無効な場合の処理
+            if not creds or not creds.valid:
+                if creds and creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                else:
+                    st.error("❌ 認証エラー: 再度 Codespaces で token.json を取得し直して Secrets を更新してください。")
+                    st.stop()
+
+            # 3. カレンダーAPIの準備
+            service = build('calendar', 'v3', credentials=creds)
+
+            # --- カレンダー登録用の共通関数 ---
+            def insert_event(summary, start_datetime, end_datetime, location=""):
+                event_body = {
+                    'summary': summary,
+                    'location': location,
+                    'start': {
+                        'dateTime': start_datetime.isoformat(),
+                        'timeZone': 'Asia/Tokyo',
+                    },
+                    'end': {
+                        'dateTime': end_datetime.isoformat(),
+                        'timeZone': 'Asia/Tokyo',
+                    },
+                }
+                service.events().insert(calendarId='primary', body=event_body).execute()
+
+            # --- 3つの予定を順番に登録 ---
+            insert_event(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt)
+            insert_event(f"🚃 移動：{event_title}", leave_home_dt, target_arrival_dt)
+            
+            full_location = f"{facility_name} {event_address_full}".strip()
+            insert_event(event_title, event_dt, end_dt, location=full_location)
+
+        st.success("✅ カレンダーに【準備】【移動】【本番】の3つの予定を登録しました！")
+        st.balloons()
+
+    except Exception as e:
+        st.error("❌ カレンダーへの登録に失敗しました。")
+        st.code(e)

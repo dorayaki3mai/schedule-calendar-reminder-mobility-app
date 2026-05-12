@@ -1,3 +1,4 @@
+# --- 必要なライブラリのインポート ---
 import streamlit as st
 import streamlit.components.v1 as components
 import json
@@ -8,6 +9,7 @@ import urllib.parse
 import os.path
 # タイムゾーン操作用
 import pytz
+# Google Calendar API連携用
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -18,8 +20,10 @@ from streamlit_js_eval import streamlit_js_eval
 # ==========================================
 # 0. システム設定（タイムゾーン）
 # ==========================================
+# --- ページ全体の基本設定（タイトルとレイアウト） ---
 st.set_page_config(page_title="スケジュール＆移動ルーター", layout="centered")
 
+# --- サイドバーでのタイムゾーン選択機能 ---
 st.sidebar.header("⚙️ システム設定")
 # 一般的なタイムゾーンのリスト
 tz_options = ["Asia/Tokyo", "UTC", "US/Pacific", "Europe/London", "Asia/Shanghai"]
@@ -29,6 +33,7 @@ app_tz = pytz.timezone(selected_tz_str)
 # 現在時刻の取得（選択されたタイムゾーンに基づく）
 now_with_tz = datetime.now(app_tz)
 
+# --- メイン画面のヘッダー表示 ---
 st.title("🗓 スケジュール＆移動ルーター")
 st.write(f"現在の設定時刻: **{now_with_tz.strftime('%Y/%m/%d %H:%M:%S')}** ({selected_tz_str})")
 st.write("確実な手順で、嘘のないスケジュールをカレンダーに登録します。")
@@ -42,47 +47,24 @@ def clean_address(addr):
     addr = re.sub(r'([0-9０-９]+[-ー][0-9０-９]+[-ー][0-9０-９]+|[0-9０-９]+[-ー][0-9０-９]+|[0-9０-９]+丁目[0-9０-９]+番[0-9０-９]+号?).*$', r'\1', addr)
     return addr
 
-# --- 時間連動用の初期設定 (Session State) ---
-if "s_h" not in st.session_state:
-    st.session_state.s_h = now_with_tz.hour
-    st.session_state.s_m = now_with_tz.minute
-    # 終了時間は開始の1時間後
-    end_init = now_with_tz + timedelta(hours=1)
-    st.session_state.e_h = end_init.hour
-    st.session_state.e_m = end_init.minute
-    
-if "td_h" not in st.session_state:
-    st.session_state.td_h = now_with_tz.hour
-    st.session_state.td_m = now_with_tz.minute
-    st.session_state.ta_h = now_with_tz.hour
-    st.session_state.ta_m = now_with_tz.minute
-
-# --- 連動用関数 ---
-def sync_start_to_end():
-    st.session_state.e_h = st.session_state.s_h
-    st.session_state.e_m = st.session_state.s_m
-
-def sync_train_to_arrive():
-    st.session_state.ta_h = st.session_state.td_h
-    st.session_state.ta_m = st.session_state.td_m
-
 # ==========================================
 # STEP 1: 予定開始時間と目的地の設定
 # ==========================================
 st.header("1. 予定と目的地の設定")
 
+# --- 予定のタイトル入力 ---
 event_title = st.text_input("予定のタイトル", "")
 
-# 施設名入力
+# --- 施設名（目的地）の入力とGoogle検索リンクの生成 ---
 facility_name = st.text_input("施設名（目的地）", "")
 if facility_name:
     google_search_url = f"https://www.google.com/search?q={urllib.parse.quote(facility_name + ' 住所')}"
     st.link_button(f"🔍 「{facility_name}」の住所をGoogleで検索", google_search_url)
 
-# 目的地住所（フル）
+# --- 目的地の住所入力 ---
 event_address_full = st.text_input("目的地住所（ビル・マンション名まで含む）", "")
 
-# 住所の加工
+# --- 住所の加工と表示用文字列の生成 ---
 cleaned_address = clean_address(event_address_full)
 # 視覚確認用：ビル名を含むフル情報
 full_destination_target = f"{facility_name} {event_address_full}".strip()
@@ -90,13 +72,15 @@ full_destination_target = f"{facility_name} {event_address_full}".strip()
 # --------------------------------------------------
 # 地図表示と近隣駅入力
 # --------------------------------------------------
+# --- 住所が入力された場合の地図連携処理 ---
 if event_address_full:
     st.write("---")
     st.write(f"▼ 🗺️ 目的地のマップ（視覚的確認）")
-    # APIキーなしで利用可能な埋め込みURL形式
+    # APIキーなしで利用可能な埋め込みURL形式でGoogleマップを表示
     map_embed_url = f"https://www.google.com/maps?q={urllib.parse.quote(full_destination_target)}&output=embed"
     components.iframe(map_embed_url, height=350, scrolling=True)
 
+    # --- 周辺駅検索のリンク生成 ---
     st.write("▼ 🚉 周辺の駅を探す")
     
     # 検索クエリ：周辺の駅 around:cleaned_address 
@@ -106,9 +90,11 @@ if event_address_full:
     # 駅を探すボタンを表示
     st.link_button("🔍 地図を開いて周辺の駅を探す（別タブ）", nearby_station_url, use_container_width=True)
 
+    # --- 降車駅の入力 ---
     st.write("▼ 🚉 目的地の近隣駅を入力")
     arrival_station = st.text_input("地図を確認して近隣駅（降車駅）を入力してください", "", key="arrival_station_input")
 
+    # --- 降車駅から目的地までの徒歩ルート検索リンク生成 ---
     # 駅名が入力されたら、その駅から目的地までの徒歩ルートボタンを表示
     if arrival_station:
         route_search_url = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(arrival_station + '駅')}&destination={urllib.parse.quote(cleaned_address)}&travelmode=walking"
@@ -117,49 +103,42 @@ if event_address_full:
         st.caption("※上のボタンで駅を探し、駅名を入力するとルート確認ボタンが表示されます。")
             
 # --- 以下、時間設定やカレンダー登録などのロジック ---
+# --- 予定の日時入力 ---
 st.write("---")
 event_date = st.date_input("予定の日付", datetime.today())
 
-# --- 現在時刻と1時間後の計算 ---
-now_h = now_with_tz.hour
-now_m = now_with_tz.minute
-
-end_dt = now_with_tz + timedelta(hours=1)
-end_h = end_dt.hour
-end_m = end_dt.minute
-# ------------------------------
-
+# --- 予定の開始時刻入力（プルダウン形式） ---
 st.write("🕒 **予定開始時間**")
 col_s_h, col_s_m = st.columns(2)
 with col_s_h:
-    # indexに現在時刻の「時(now_h)」を指定
-    start_hour = st.selectbox("開始（時）", [f"{i:02d}" for i in range(24)], index=now_h)
+    start_hour = st.selectbox("開始（時）", [f"{i:02d}" for i in range(24)], index=10)
 with col_s_m:
-    # indexに現在時刻の「分(now_m)」を指定
-    start_minute = st.selectbox("開始（分）", [f"{i:02d}" for i in range(60)], index=now_m)
+    start_minute = st.selectbox("開始（分）", [f"{i:02d}" for i in range(60)], index=30)
 start_time = time(int(start_hour), int(start_minute))
 
+# --- 予定の終了時刻入力（プルダウン形式） ---
 st.write("🕒 **予定終了時間**")
 col_e_h, col_e_m = st.columns(2)
 with col_e_h:
-    # indexに1時間後の「時(end_h)」を指定
-    end_hour = st.selectbox("終了（時）", [f"{i:02d}" for i in range(24)], index=end_h)
+    end_hour = st.selectbox("終了（時）", [f"{i:02d}" for i in range(24)], index=11)
 with col_e_m:
-    # indexに1時間後の「分(end_m)」を指定
-    end_minute = st.selectbox("終了（分）", [f"{i:02d}" for i in range(60)], index=end_m)
+    end_minute = st.selectbox("終了（分）", [f"{i:02d}" for i in range(60)], index=30)
 end_time = time(int(end_hour), int(end_minute))
 
+# --- 目的地への到着目標時刻（バッファ）の設定 ---
 st.write("---")
 arrival_buffer_option = st.selectbox(
     "予定開始の何分前に到着しますか？",
     ["5分前", "10分前", "15分前", "20分前", "自由入力（分）"],
     index=1
 )
+# 自由入力か選択肢かで処理を分岐
 if arrival_buffer_option == "自由入力（分）":
     buffer_minutes = st.number_input("到着バッファ（分）", value=30, min_value=0, step=1)
 else:
     buffer_minutes = int(re.search(r'\d+', arrival_buffer_option).group())
 
+# 開始時刻からバッファを引いて、目標到着時刻を算出
 event_dt = datetime.combine(event_date, start_time)
 target_arrival_dt = event_dt - timedelta(minutes=buffer_minutes)
 st.info(f"💡 目標到着時刻: **{target_arrival_dt.strftime('%H:%M')}**")
@@ -168,11 +147,15 @@ st.info(f"💡 目標到着時刻: **{target_arrival_dt.strftime('%H:%M')}**")
 # STEP 2: 降車駅からの徒歩計算
 # ==========================================
 st.header("2. 降車駅からの徒歩計算")
+
+# --- セッションステートから降車駅を取得して表示 ---
 if 'arrival_station_input' in st.session_state:
     arrival_station = st.session_state.arrival_station_input
 else:
     arrival_station = ""
 st.write(f"🚉 選択された駅: **{arrival_station if arrival_station else '（未入力）'}**")
+
+# --- 駅からの徒歩時間を入力し、電車の到着リミットを逆算 ---
 walk_to_dest = st.number_input(f"駅から目的地までの徒歩時間（分）", value=5, step=1)
 train_deadline_dt = target_arrival_dt - timedelta(minutes=walk_to_dest)
 st.success(f"🚃 **{arrival_station}駅** に **{train_deadline_dt.strftime('%H:%M')}** までに到着する電車を探します。")
@@ -193,6 +176,7 @@ loc = streamlit_js_eval(js_expressions="done(window.navigator.geolocation.getCur
     done({lat, lng}); \
 }))", key="get_location")
 
+# 位置情報が取得できたらGoogleマップリンクを生成
 if loc:
     lat, lng = loc['lat'], loc['lng']
     gps_query = f"周辺の駅 around:{lat},{lng}"
@@ -203,7 +187,7 @@ else:
 
 st.write("---")
 
-# --- 出発駅候補リストの設定 ---
+# --- 出発駅候補リストの設定とセッションステートの初期化 ---
 st.write("▼ 出発駅の候補リスト")
 
 # 1. 履歴管理用の初期化
@@ -226,12 +210,14 @@ def save_to_history():
     if len(st.session_state.station_history) > 5:
         st.session_state.station_history = st.session_state.station_history[:5]
 
+# --- 新規駅の追加UI（スマホ向け） ---
 # 3. 新規駅の追加UI（スマホ向け）
 st.caption("💡 新しい駅を追加する場合は入力してボタンを押してください。")
 col_add_input, col_add_btn = st.columns([3, 1])
 with col_add_input:
     new_station_name = st.text_input("駅名を入力", key="new_station_input", label_visibility="collapsed", placeholder="例：箱根板橋")
 with col_add_btn:
+    # 追加ボタン押下時の処理（履歴保存とDataFrame更新）
     if st.button("➕ 追加", key="add_station_btn", use_container_width=True):
         if new_station_name.strip() != "":
             save_to_history()
@@ -242,6 +228,7 @@ with col_add_btn:
 
 st.write("---")
 
+# --- 駅リストの表示と削除機能 ---
 # 4. リストの表示と個別削除ボタン（スマホ向けUI）
 for idx, row in st.session_state.station_df.iterrows():
     # スマホで押しやすいように、ボタンの幅を調整（縦位置を中央に揃える）
@@ -253,6 +240,7 @@ for idx, row in st.session_state.station_df.iterrows():
         st.markdown(f"**{row['出発駅名']}**")
     with col_del:
         # keyにidxを含めることで、各行のボタンを独立させる
+        # 削除ボタン押下時の処理（履歴保存、行削除、インデックス再構築）
         if st.button("🗑️ 削除", key=f"del_sta_{idx}", use_container_width=True):
             save_to_history()
             # 該当の行を削除
@@ -263,6 +251,7 @@ for idx, row in st.session_state.station_df.iterrows():
 
 st.write("---")
 
+# --- 変更履歴の管理（復元と削除） ---
 # 5. 履歴の復元・削除機能（スマホ向けUI）
 if st.session_state.station_history:
     with st.expander("⏪ 変更履歴の管理（直近5件）"):
@@ -282,6 +271,7 @@ if st.session_state.station_history:
             # 履歴と履歴の間に見やすい区切り線を入れる
             st.divider() 
 
+# --- 出発駅の選択とジョルダン乗換案内のURL生成 ---
 # 出発駅の選択
 valid_stations = [s for s in st.session_state.station_df["出発駅名"].tolist() if s and str(s).strip() != ""]
 depart_station = st.selectbox("今回利用する出発駅", valid_stations if valid_stations else ["駅名を入力してください"])
@@ -303,25 +293,24 @@ st.link_button("↗️ ジョルダン乗換案内でルートを検索", joruda
 st.write("---")
 st.write("▼ 調べた電車の時刻を入力してください")
 
+# --- 確定した電車の出発時刻の入力 ---
 st.write("🚃 **確定した電車の 出発時刻**")
 col_td_h, col_td_m = st.columns(2)
 with col_td_h:
-    # ここも現在時刻（now_h）を初期値に
-    train_depart_hour = st.selectbox("出発（時）", [f"{i:02d}" for i in range(24)], index=now_h)
+    train_depart_hour = st.selectbox("出発（時）", [f"{i:02d}" for i in range(24)], index=9)
 with col_td_m:
-    # 現在時刻（now_m）を初期値に
-    train_depart_minute = st.selectbox("出発（分）", [f"{i:02d}" for i in range(60)], index=now_m)
+    train_depart_minute = st.selectbox("出発（分）", [f"{i:02d}" for i in range(60)], index=34)
 train_depart_time = time(int(train_depart_hour), int(train_depart_minute))
 
+# --- 確定した電車の到着時刻の入力 ---
 st.write("🚃 **確定した電車の 到着時刻**")
 col_ta_h, col_ta_m = st.columns(2)
 with col_ta_h:
-    # 同様に現在時刻（now_h）を初期値に
-    train_arrive_hour = st.selectbox("到着（時）", [f"{i:02d}" for i in range(24)], index=now_h)
+    train_arrive_hour = st.selectbox("到着（時）", [f"{i:02d}" for i in range(24)], index=10)
 with col_ta_m:
-    # 現在時刻（now_m）を初期値に
-    train_arrive_minute = st.selectbox("到着（分）", [f"{i:02d}" for i in range(60)], index=now_m)
+    train_arrive_minute = st.selectbox("到着（分）", [f"{i:02d}" for i in range(60)], index=14)
 train_arrive_time = time(int(train_arrive_hour), int(train_arrive_minute))
+
 
 # ==========================================
 # STEP 4: 出発前の準備
@@ -331,6 +320,7 @@ st.header("4. 出発前の準備")
 st.write("---")
 st.write("▼ 🏠 自宅からの徒歩時間（ワンタッチ入力）")
 
+# --- 徒歩時間のワンタッチボタン（プリセット）管理 ---
 # 1. ワンタッチボタンのデータ保存用リストの初期化
 if "walk_presets" not in st.session_state:
     st.session_state.walk_presets = [
@@ -359,6 +349,7 @@ for i, preset in enumerate(st.session_state.walk_presets):
             use_container_width=True
         )
 
+# --- ワンタッチボタンの編集UI（追加・削除） ---
 # 4. スマホで使いやすい編集メニュー（折りたたみ）
 with st.expander("⚙️ ワンタッチボタンの編集（追加・削除）"):
     st.caption("【削除】不要なボタンは横の削除ボタンで消せます。")
@@ -396,9 +387,11 @@ with st.expander("⚙️ ワンタッチボタンの編集（追加・削除）"
 
 st.write("---")
 
+# --- 最終的な準備・出発時刻の逆算処理 ---
 walk_to_station = st.number_input("現在地から【利用する出発駅】までの徒歩時間（分）", key="walk_time", step=1)
 prep_time = st.number_input("移動前の準備（仕度）時間（分）", value=15, step=1)
 
+# 電車出発時刻から逆算して「家を出る時間」「準備を始める時間」を計算
 train_depart_dt = datetime.combine(event_date, train_depart_time)
 leave_home_dt = train_depart_dt - timedelta(minutes=walk_to_station)
 start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
@@ -413,6 +406,7 @@ st.header("5. カレンダー登録")
 if st.button("📅 カレンダーに登録"):
     try:
         with st.spinner("Googleカレンダーに通信中..."):
+            # --- Google Calendar APIの認証処理 ---
             SCOPES = ['https://www.googleapis.com/auth/calendar']
             creds = None
             if os.path.exists('token.json'):
@@ -428,8 +422,10 @@ if st.button("📅 カレンダーに登録"):
                     st.error("❌ 認証エラー: 再認証が必要です。")
                     st.stop()
 
+            # APIクライアントの構築
             service = build('calendar', 'v3', credentials=creds)
 
+            # --- カレンダーに予定を追加するためのヘルパー関数 ---
             def insert_event(summary, start_datetime, end_datetime, location=""):
                 event_body = {
                     'summary': summary,
@@ -439,19 +435,26 @@ if st.button("📅 カレンダーに登録"):
                 }
                 service.events().insert(calendarId='primary', body=event_body).execute()
 
-            # --- 予定の3分割と算出ロジック ---
+            # --- 予定の3分割と算出ロジック（日付またぎ考慮と到着時刻計算） ---
             train_arrive_dt = datetime.combine(event_date, train_arrive_time)
             
+            # 出発時刻より到着時刻が前の場合、翌日到着と判定
             if train_arrive_dt < train_depart_dt:
                 train_arrive_dt += timedelta(days=1)
             
+            # 電車到着時刻に徒歩時間を足して実際の到着時刻を計算
             actual_arrive_dt = train_arrive_dt + timedelta(minutes=walk_to_dest)
 
-            # --- カレンダーへのイベント登録（5連続） ---
+            # --- カレンダーへのイベント登録（5連続実行） ---
+            # 1. 準備時間
             insert_event(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt)
+            # 2. 出発駅から自宅までの徒歩
             insert_event(f"🚶 徒歩（自宅〜{depart_station}駅）：{event_title}", leave_home_dt, train_depart_dt)
+            # 3. 電車の乗車時間
             insert_event(f"🚃 電車（{depart_station}駅〜{arrival_station}駅）：{event_title}", train_depart_dt, train_arrive_dt)
+            # 4. 降車駅から目的地までの徒歩
             insert_event(f"🚶 徒歩（{arrival_station}駅〜目的地）：{event_title}", train_arrive_dt, actual_arrive_dt)
+            # 5. メインの予定
             insert_event(event_title, event_dt, datetime.combine(event_date, end_time), location=full_destination_target)
 
         st.success("✅ 準備から移動の詳細、本番までの5つの予定をカレンダーに登録しました！")

@@ -119,23 +119,22 @@ if not valid_stations:
 
 depart_station = st.selectbox("今回利用する出発駅", valid_stations)
 
-# Yahoo路線のURLを自動生成
-params = {
-    "from": depart_station,
-    "to": arrival_station,
-    "y": event_date.strftime("%Y"),
-    "m": event_date.strftime("%m"),
-    "d": event_date.strftime("%d"),
-    "hh": train_deadline_dt.strftime("%H"),
-    "mm": train_deadline_dt.strftime("%M"),
-    "type": "4", # 到着時刻指定
-    "ticket": "ic",
-    "s": "0"
+# ジョルダン乗換案内のURLを自動生成（到着時刻指定: Cway=1）
+jorudan_params = {
+    "eki1": depart_station,
+    "eki2": arrival_station,
+    "Dym": event_date.strftime("%Y%m"), 
+    "Ddd": event_date.strftime("%d"),   
+    "Dhh": train_deadline_dt.strftime("%H"), 
+    "Dmn1": str(train_deadline_dt.minute // 10), 
+    "Dmn2": str(train_deadline_dt.minute % 10),  
+    "Cway": "1", 
+    "Cfp": "1"
 }
-yahoo_url = "https://transit.yahoo.co.jp/search/result?" + urllib.parse.urlencode(params)
+jorudan_url = "https://www.jorudan.co.jp/norikae/cgi/nori.cgi?" + urllib.parse.urlencode(jorudan_params, encoding='utf-8')
 
 st.write("以下のボタンを押して、最適な電車の時間を調べてください。")
-st.link_button("↗️ Yahoo!路線情報でルートを検索", yahoo_url)
+st.link_button("↗️ ジョルダン乗換案内でルートを検索", jorudan_url)
 
 st.write("---")
 st.write("▼ 調べた電車の時刻を入力してください")

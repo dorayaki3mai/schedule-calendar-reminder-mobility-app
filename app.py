@@ -28,11 +28,11 @@ app_tz = pytz.timezone(selected_tz_str)
 
 # 現在時刻の取得（選択されたタイムゾーンに基づく）
 now_with_tz = datetime.now(app_tz)
-st.set_page_config(page_title="スケジュール＆移動ルーター", layout="centered")
 
 st.title("🗓 スケジュール＆移動ルーター")
 st.write(f"現在の設定時刻: **{now_with_tz.strftime('%Y/%m/%d %H:%M:%S')}** ({selected_tz_str})")
 st.write("確実な手順で、嘘のないスケジュールをカレンダーに登録します。")
+
 # --- 住所クレンジング関数（ビル・マンション名以降をカット） ---
 def clean_address(addr):
     if not addr: return ""
@@ -75,10 +75,7 @@ if event_address_full:
 
     st.write("▼ 🚉 周辺の駅を探す")
     
-    # 【追加】検索クエリ：周辺の駅 around:cleaned_address 
-    # 1. 「駅」を先頭にする。 
-    # 2. ビル名を含まない cleaned_address を使い、"around" で場所を指定する。
-    # これにより「この場所の周辺にある複数の駅」を調べるという検索意図が明確になります。
+    # 検索クエリ：周辺の駅 around:cleaned_address 
     nearby_search_query = f"周辺の駅 around:{cleaned_address}"
     nearby_station_url = f"https://www.google.com/maps/search/{urllib.parse.quote(nearby_search_query)}"
     
@@ -137,7 +134,7 @@ st.header("2. 降車駅からの徒歩計算")
 if 'arrival_station_input' in st.session_state:
     arrival_station = st.session_state.arrival_station_input
 else:
-    arrival_station = ""  # まだ入力されていない場合は空文字にしてエラーを防ぐ
+    arrival_station = ""
 st.write(f"🚉 選択された駅: **{arrival_station if arrival_station else '（未入力）'}**")
 walk_to_dest = st.number_input(f"駅から目的地までの徒歩時間（分）", value=5, step=1)
 train_deadline_dt = target_arrival_dt - timedelta(minutes=walk_to_dest)
@@ -185,10 +182,11 @@ if "station_df" not in st.session_state:
         {"順番": 3, "出発駅名": "小田原", "削除": False}
     ])
 
-# 2. 履歴保存関数
+# 2. 履歴保存関数（★ここでタイムゾーンと日付を適用）
 def save_to_history():
     snapshot = st.session_state.station_df.copy()
-    timestamp = datetime.now().strftime("%H:%M:%S")
+    # app_tz（設定したタイムゾーン）を適用し、日付と時間の形式で取得
+    timestamp = datetime.now(app_tz).strftime("%Y/%m/%d %H:%M:%S")
     st.session_state.station_history.insert(0, {"time": timestamp, "data": snapshot})
     if len(st.session_state.station_history) > 5:
         st.session_state.station_history = st.session_state.station_history[:5]
@@ -199,7 +197,6 @@ edited_stations = st.data_editor(
     num_rows="dynamic",
     use_container_width=True,
     hide_index=True,
-    # 【重要】column_order で右側に配置
     column_order=("順番", "出発駅名", "削除"),
     column_config={
         "順番": st.column_config.NumberColumn("順", width=60, min_value=1, format="%d"),
@@ -347,33 +344,19 @@ if st.button("📅 カレンダーに登録"):
                 }
                 service.events().insert(calendarId='primary', body=event_body).execute()
 
-            # --- 追加計算：到着時刻のdatetime化と、最終到着時刻の算出 ---
-            
-            # STEP3で取得した電車の到着時間(時間と分)に、予定日を結合して日時データ化する
+            # --- 予定の3分割と算出ロジック ---
             train_arrive_dt = datetime.combine(event_date, train_arrive_time)
             
-            # 日またぎ（出発時刻より到着時刻の数値が小さい場合）の考慮
             if train_arrive_dt < train_depart_dt:
                 train_arrive_dt += timedelta(days=1)
             
-            # 駅から目的地までの徒歩時間を足して「実際の目的地到着時刻」を算出
             actual_arrive_dt = train_arrive_dt + timedelta(minutes=walk_to_dest)
 
             # --- カレンダーへのイベント登録（5連続） ---
-            
-            # 1. 準備の予定
             insert_event(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt)
-            
-            # 2. 移動の予定①：自宅～出発駅（徒歩）
             insert_event(f"🚶 徒歩（自宅〜{depart_station}駅）：{event_title}", leave_home_dt, train_depart_dt)
-            
-            # 3. 移動の予定②：出発駅～降車駅（電車）
             insert_event(f"🚃 電車（{depart_station}駅〜{arrival_station}駅）：{event_title}", train_depart_dt, train_arrive_dt)
-            
-            # 4. 移動の予定③：降車駅～目的地（徒歩）
             insert_event(f"🚶 徒歩（{arrival_station}駅〜目的地）：{event_title}", train_arrive_dt, actual_arrive_dt)
-            
-            # 5. 本番の予定
             insert_event(event_title, event_dt, datetime.combine(event_date, end_time), location=full_destination_target)
 
         st.success("✅ 準備から移動の詳細、本番までの5つの予定をカレンダーに登録しました！")

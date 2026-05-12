@@ -107,22 +107,42 @@ if event_address_full:
 st.write("---")
 event_date = st.date_input("予定の日付", datetime.today())
 
-# --- 予定の開始時刻入力（プルダウン形式） ---
+# --- 【機能追加】予定の開始・終了時刻の連動用セッションステートと関数 ---
+# 初期値の設定
+if "start_h" not in st.session_state:
+    st.session_state.start_h = "10"
+if "start_m" not in st.session_state:
+    st.session_state.start_m = "30"
+if "end_h" not in st.session_state:
+    st.session_state.end_h = "11"
+if "end_m" not in st.session_state:
+    st.session_state.end_m = "30"
+
+# 開始時間が変更されたときに実行されるコールバック関数
+def sync_end_time():
+    h = int(st.session_state.start_h)
+    m = st.session_state.start_m
+    # 終了時間を1時間後に設定（23時の次は0時になるように%24を使用）
+    end_h = (h + 1) % 24
+    st.session_state.end_h = f"{end_h:02d}"
+    st.session_state.end_m = m
+
+# --- 予定の開始時刻入力（コールバックを付与） ---
 st.write("🕒 **予定開始時間**")
 col_s_h, col_s_m = st.columns(2)
 with col_s_h:
-    start_hour = st.selectbox("開始（時）", [f"{i:02d}" for i in range(24)], index=10)
+    start_hour = st.selectbox("開始（時）", [f"{i:02d}" for i in range(24)], key="start_h", on_change=sync_end_time)
 with col_s_m:
-    start_minute = st.selectbox("開始（分）", [f"{i:02d}" for i in range(60)], index=30)
+    start_minute = st.selectbox("開始（分）", [f"{i:02d}" for i in range(60)], key="start_m", on_change=sync_end_time)
 start_time = time(int(start_hour), int(start_minute))
 
-# --- 予定の終了時刻入力（プルダウン形式） ---
+# --- 予定の終了時刻入力（個別修正可能） ---
 st.write("🕒 **予定終了時間**")
 col_e_h, col_e_m = st.columns(2)
 with col_e_h:
-    end_hour = st.selectbox("終了（時）", [f"{i:02d}" for i in range(24)], index=11)
+    end_hour = st.selectbox("終了（時）", [f"{i:02d}" for i in range(24)], key="end_h")
 with col_e_m:
-    end_minute = st.selectbox("終了（分）", [f"{i:02d}" for i in range(60)], index=30)
+    end_minute = st.selectbox("終了（分）", [f"{i:02d}" for i in range(60)], key="end_m")
 end_time = time(int(end_hour), int(end_minute))
 
 # --- 目的地への到着目標時刻（バッファ）の設定 ---
@@ -293,22 +313,39 @@ st.link_button("↗️ ジョルダン乗換案内でルートを検索", joruda
 st.write("---")
 st.write("▼ 調べた電車の時刻を入力してください")
 
-# --- 確定した電車の出発時刻の入力 ---
+# --- 【機能追加】電車の出発・到着時刻の連動用セッションステートと関数 ---
+# 初期値の設定
+if "train_dep_h" not in st.session_state:
+    st.session_state.train_dep_h = "09"
+if "train_dep_m" not in st.session_state:
+    st.session_state.train_dep_m = "34"
+if "train_arr_h" not in st.session_state:
+    st.session_state.train_arr_h = "10"
+if "train_arr_m" not in st.session_state:
+    st.session_state.train_arr_m = "14"
+
+# 出発時間が変更されたときに実行されるコールバック関数
+def sync_train_arrive_time():
+    # 到着時間を出発時間と全く同じ時刻に上書き設定
+    st.session_state.train_arr_h = st.session_state.train_dep_h
+    st.session_state.train_arr_m = st.session_state.train_dep_m
+
+# --- 確定した電車の出発時刻の入力（コールバックを付与） ---
 st.write("🚃 **確定した電車の 出発時刻**")
 col_td_h, col_td_m = st.columns(2)
 with col_td_h:
-    train_depart_hour = st.selectbox("出発（時）", [f"{i:02d}" for i in range(24)], index=9)
+    train_depart_hour = st.selectbox("出発（時）", [f"{i:02d}" for i in range(24)], key="train_dep_h", on_change=sync_train_arrive_time)
 with col_td_m:
-    train_depart_minute = st.selectbox("出発（分）", [f"{i:02d}" for i in range(60)], index=34)
+    train_depart_minute = st.selectbox("出発（分）", [f"{i:02d}" for i in range(60)], key="train_dep_m", on_change=sync_train_arrive_time)
 train_depart_time = time(int(train_depart_hour), int(train_depart_minute))
 
-# --- 確定した電車の到着時刻の入力 ---
+# --- 確定した電車の到着時刻の入力（個別修正可能） ---
 st.write("🚃 **確定した電車の 到着時刻**")
 col_ta_h, col_ta_m = st.columns(2)
 with col_ta_h:
-    train_arrive_hour = st.selectbox("到着（時）", [f"{i:02d}" for i in range(24)], index=10)
+    train_arrive_hour = st.selectbox("到着（時）", [f"{i:02d}" for i in range(24)], key="train_arr_h")
 with col_ta_m:
-    train_arrive_minute = st.selectbox("到着（分）", [f"{i:02d}" for i in range(60)], index=14)
+    train_arrive_minute = st.selectbox("到着（分）", [f"{i:02d}" for i in range(60)], key="train_arr_m")
 train_arrive_time = time(int(train_arrive_hour), int(train_arrive_minute))
 
 

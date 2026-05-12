@@ -195,7 +195,7 @@ col_add_input, col_add_btn = st.columns([3, 1])
 with col_add_input:
     new_station_name = st.text_input("駅名を入力", key="new_station_input", label_visibility="collapsed", placeholder="例：箱根板橋")
 with col_add_btn:
-    if st.button("➕ 追加", use_container_width=True):
+    if st.button("➕ 追加", key="add_station_btn", use_container_width=True):
         if new_station_name.strip() != "":
             save_to_history()
             new_order = len(st.session_state.station_df) + 1
@@ -290,17 +290,72 @@ st.header("4. 出発前の準備")
 
 st.write("---")
 st.write("▼ 🏠 自宅からの徒歩時間（ワンタッチ入力）")
+
+# 1. ワンタッチボタンのデータ保存用リストの初期化
+if "walk_presets" not in st.session_state:
+    st.session_state.walk_presets = [
+        {"name": "井細田", "time": 5},
+        {"name": "足柄", "time": 15},
+        {"name": "小田原", "time": 28}
+    ]
+
+# 2. 徒歩時間の初期化と反映用関数
 if "walk_time" not in st.session_state:
     st.session_state.walk_time = 15
+
 def set_walk_time(mins):
     st.session_state.walk_time = mins
-col_a, col_b, col_c = st.columns(3)
-with col_a:
-    st.button("🏠 井細田 (5分)", on_click=set_walk_time, args=(5,), use_container_width=True)
-with col_b:
-    st.button("🏠 足柄 (15分)", on_click=set_walk_time, args=(15,), use_container_width=True)
-with col_c:
-    st.button("🏠 小田原 (28分)", on_click=set_walk_time, args=(28,), use_container_width=True)
+
+# 3. ワンタッチボタンの動的表示（3列で自動配置）
+cols = st.columns(3)
+for i, preset in enumerate(st.session_state.walk_presets):
+    col_idx = i % 3  # 0, 1, 2の順番で列に割り当て
+    with cols[col_idx]:
+        st.button(
+            f"🏠 {preset['name']} ({preset['time']}分)", 
+            on_click=set_walk_time, 
+            args=(preset['time'],), 
+            key=f"preset_btn_{i}", 
+            use_container_width=True
+        )
+
+# 4. スマホで使いやすい編集メニュー（折りたたみ）
+with st.expander("⚙️ ワンタッチボタンの編集（追加・削除）"):
+    st.caption("【削除】不要なボタンは横の削除ボタンで消せます。")
+    # 登録されているボタンをリスト表示
+    for i, preset in enumerate(st.session_state.walk_presets):
+        c_name, c_time, c_del = st.columns([3, 2, 2], vertical_alignment="center")
+        with c_name:
+            st.markdown(f"**{preset['name']}**")
+        with c_time:
+            st.markdown(f"{preset['time']}分")
+        with c_del:
+            if st.button("🗑️ 削除", key=f"del_preset_{i}", use_container_width=True):
+                st.session_state.walk_presets.pop(i)
+                st.rerun()
+    
+    st.divider()
+    
+    # 追加機能（6件未満の場合のみ入力欄を表示）
+    if len(st.session_state.walk_presets) < 6:
+        st.caption("【追加】新しいボタンを作ります（最大6件）")
+        # vertical_alignment="bottom" で入力欄とボタンの高さをピッタリ合わせる
+        c_new_name, c_new_time, c_new_btn = st.columns([3, 2, 2], vertical_alignment="bottom")
+        with c_new_name:
+            new_p_name = st.text_input("表示名", key="new_p_name_input", placeholder="例: コンビニ")
+        with c_new_time:
+            new_p_time = st.number_input("分", min_value=1, value=10, step=1, key="new_p_time_input")
+        with c_new_btn:
+            if st.button("➕ 追加", key="add_preset_btn", use_container_width=True):
+                if new_p_name.strip() != "":
+                    # リストに新しいデータを追加して画面を更新
+                    st.session_state.walk_presets.append({"name": new_p_name.strip(), "time": new_p_time})
+                    st.rerun()
+    else:
+        st.warning("💡 登録上限（6件）に達しています。追加するには上のリストから削除してください。")
+
+st.write("---")
+
 walk_to_station = st.number_input("現在地から【利用する出発駅】までの徒歩時間（分）", key="walk_time", step=1)
 prep_time = st.number_input("移動前の準備（仕度）時間（分）", value=15, step=1)
 

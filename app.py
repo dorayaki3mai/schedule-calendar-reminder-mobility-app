@@ -31,6 +31,7 @@ selected_tz_str = st.sidebar.selectbox("アプリの基準タイムゾーン", t
 app_tz = pytz.timezone(selected_tz_str)
 
 # 現在時刻の取得（選択されたタイムゾーンに基づく）
+# --- 【重要】ここで取得した now_with_tz を後続の初期値設定で活用します ---
 now_with_tz = datetime.now(app_tz)
 
 # --- メイン画面のヘッダー表示 ---
@@ -107,18 +108,22 @@ if event_address_full:
 st.write("---")
 event_date = st.date_input("予定の日付", datetime.today())
 
-# --- 【機能追加】予定の開始・終了時刻の連動用セッションステートと関数 ---
-# 初期値の設定
+# --- 予定の開始・終了時刻の初期値を「現在時刻ベース」に変更 ---
+# セッションステートに値がない（初回読み込み）時だけ、現在時刻をセットします
 if "start_h" not in st.session_state:
-    st.session_state.start_h = "10"
+    st.session_state.start_h = now_with_tz.strftime("%H")
 if "start_m" not in st.session_state:
-    st.session_state.start_m = "30"
-if "end_h" not in st.session_state:
-    st.session_state.end_h = "11"
-if "end_m" not in st.session_state:
-    st.session_state.end_m = "30"
+    st.session_state.start_m = now_with_tz.strftime("%M")
 
-# 開始時間が変更されたときに実行されるコールバック関数
+# 終了時間の初期値も、現在時刻＋1時間になるように整合性を取ります
+if "end_h" not in st.session_state:
+    # 現在時刻に1時間足した時間を計算
+    init_end_time = now_with_tz + timedelta(hours=1)
+    st.session_state.end_h = init_end_time.strftime("%H")
+if "end_m" not in st.session_state:
+    st.session_state.end_m = now_with_tz.strftime("%M")
+
+# 開始時間が変更されたときに実行されるコールバック関数（ロジックは変更なし）
 def sync_end_time():
     h = int(st.session_state.start_h)
     m = st.session_state.start_m
@@ -313,18 +318,19 @@ st.link_button("↗️ ジョルダン乗換案内でルートを検索", joruda
 st.write("---")
 st.write("▼ 調べた電車の時刻を入力してください")
 
-# --- 【機能追加】電車の出発・到着時刻の連動用セッションステートと関数 ---
-# 初期値の設定
+# --- 電車の出発・到着時刻の初期値を「現在時刻」に変更 ---
 if "train_dep_h" not in st.session_state:
-    st.session_state.train_dep_h = "09"
+    st.session_state.train_dep_h = now_with_tz.strftime("%H")
 if "train_dep_m" not in st.session_state:
-    st.session_state.train_dep_m = "34"
-if "train_arr_h" not in st.session_state:
-    st.session_state.train_arr_h = "10"
-if "train_arr_m" not in st.session_state:
-    st.session_state.train_arr_m = "14"
+    st.session_state.train_dep_m = now_with_tz.strftime("%M")
 
-# 出発時間が変更されたときに実行されるコールバック関数
+# 出発と到着が同じ時刻になるよう、到着側も現在時刻で初期化します
+if "train_arr_h" not in st.session_state:
+    st.session_state.train_arr_h = now_with_tz.strftime("%H")
+if "train_arr_m" not in st.session_state:
+    st.session_state.train_arr_m = now_with_tz.strftime("%M")
+
+# 出発時間が変更されたときに実行されるコールバック関数（ロジックは変更なし）
 def sync_train_arrive_time():
     # 到着時間を出発時間と全く同じ時刻に上書き設定
     st.session_state.train_arr_h = st.session_state.train_dep_h
@@ -440,6 +446,14 @@ st.warning(f"🚶 **出発時刻: {leave_home_dt.strftime('%H:%M')}**")
 # STEP 5: カレンダー登録
 # ==========================================
 st.header("5. カレンダー登録")
+
+# --- 【機能追加】モバイル・タブレット向け：電車イベント登録のトグルスイッチ ---
+st.write("▼ 登録オプション")
+st.caption("カレンダーをすっきりさせたい場合、電車の乗車時間を登録から外すことができます。")
+# スマホ・iPadのタッチ操作に最適化されたトグル（iOSのスイッチ風）を使用。
+# UI負荷も軽く、直感的な操作が可能です。
+include_train_event = st.toggle("🚃 電車の乗車時間もカレンダーに登録する", value=True)
+
 if st.button("📅 カレンダーに登録"):
     try:
         with st.spinner("Googleカレンダーに通信中..."):
@@ -482,19 +496,30 @@ if st.button("📅 カレンダーに登録"):
             # 電車到着時刻に徒歩時間を足して実際の到着時刻を計算
             actual_arrive_dt = train_arrive_dt + timedelta(minutes=walk_to_dest)
 
-            # --- カレンダーへのイベント登録（5連続実行） ---
+            # --- カレンダーへのイベント登録実行 ---
             # 1. 準備時間
             insert_event(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt)
             # 2. 出発駅から自宅までの徒歩
             insert_event(f"🚶 徒歩（自宅〜{depart_station}駅）：{event_title}", leave_home_dt, train_depart_dt)
-            # 3. 電車の乗車時間
-            insert_event(f"🚃 電車（{depart_station}駅〜{arrival_station}駅）：{event_title}", train_depart_dt, train_arrive_dt)
+            
+            # --- 【機能追加】通信・デバイス負荷の軽減ロジック ---
+            # トグルがON(True)の時のみAPIリクエストを実行します。
+            # OFFの時は通信処理自体をスキップするため、登録時間の短縮と端末負荷の軽減に繋がります。
+            # 3. 電車の乗車時間（条件分岐で制御）
+            if include_train_event:
+                insert_event(f"🚃 電車（{depart_station}駅〜{arrival_station}駅）：{event_title}", train_depart_dt, train_arrive_dt)
+            
             # 4. 降車駅から目的地までの徒歩
             insert_event(f"🚶 徒歩（{arrival_station}駅〜目的地）：{event_title}", train_arrive_dt, actual_arrive_dt)
             # 5. メインの予定
             insert_event(event_title, event_dt, datetime.combine(event_date, end_time), location=full_destination_target)
 
-        st.success("✅ 準備から移動の詳細、本番までの5つの予定をカレンダーに登録しました！")
+        # 登録メッセージの出し分け（乗車時間を省いた場合もわかりやすく表示）
+        if include_train_event:
+            st.success("✅ 準備から移動の詳細、本番までの5つの予定をカレンダーに登録しました！")
+        else:
+            st.success("✅ 電車の乗車時間を除く、4つの予定をカレンダーに登録しました！")
+            
         st.balloons()
     except Exception as e:
         st.error(f"❌ 登録失敗: {e}")

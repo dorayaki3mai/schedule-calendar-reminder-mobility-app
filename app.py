@@ -30,6 +30,10 @@ div[data-baseweb="input"] input {
     font-size: 18px;
     font-weight: bold;
 }
+/* 設定メニュー等のボタンを左寄せにするためのCSS調整 */
+.menu-button button {
+    justify-content: flex-start !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -37,19 +41,30 @@ div[data-baseweb="input"] input {
 # データ管理系の初期化
 # ==========================================
 
+# --- 【UI改善】多階層画面遷移のための状態管理 ---
 if "current_page" not in st.session_state:
+    st.session_state.current_page = "main"
+
+def go_to_main():
     st.session_state.current_page = "main"
 
 def go_to_settings():
     st.session_state.current_page = "settings"
 
-def go_to_main():
-    st.session_state.current_page = "main"
+def go_to_settings_stations():
+    st.session_state.current_page = "settings_stations"
+
+def go_to_settings_presets():
+    st.session_state.current_page = "settings_presets"
+
 
 if "walk_time_train" not in st.session_state:
     st.session_state.walk_time_train = 15
 if "walk_time_direct" not in st.session_state:
     st.session_state.walk_time_direct = 15
+
+if "walk_presets" not in st.session_state:
+    st.session_state.walk_presets = [{"name": "井細田", "time": 5}, {"name": "足柄", "time": 15}, {"name": "小田原", "time": 28}]
 
 # --- 出発駅用 ---
 if "station_history" not in st.session_state:
@@ -130,11 +145,17 @@ def add_new_preset_callback():
     name = st.session_state.new_p_name_input.strip()
     mins = st.session_state.new_p_time_input
     if name != "":
-        if "walk_presets" not in st.session_state:
-            st.session_state.walk_presets = []
         st.session_state.walk_presets.append({"name": name, "time": mins})
         st.session_state.new_p_name_input = ""
         st.session_state.new_p_time_input = 10
+
+def add_new_preset_sb_callback():
+    name = st.session_state.new_p_name_input_sb.strip()
+    mins = st.session_state.new_p_time_input_sb
+    if name != "":
+        st.session_state.walk_presets.append({"name": name, "time": mins})
+        st.session_state.new_p_name_input_sb = ""
+        st.session_state.new_p_time_input_sb = 10
 
 def set_depart_station_callback(sta):
     st.session_state.selected_depart_station = sta
@@ -147,11 +168,11 @@ def update_timezone():
 
 
 # ==========================================
-# 画面遷移のルーティング（独立画面の実現）
+# 画面遷移のルーティング
 # ==========================================
 
 # ------------------------------------------
-# A. 設定画面（完全に独立したメニュー画面）
+# A-1. 設定メニュー一覧画面
 # ------------------------------------------
 if st.session_state.current_page == "settings":
     
@@ -161,6 +182,7 @@ if st.session_state.current_page == "settings":
     st.caption("アプリの各種設定やデータの管理を行います。")
     st.write("---")
 
+    # 基本設定などはこれまで通りエキスパンダーで表示
     with st.expander("🌍 一般設定 (タイムゾーン)", expanded=False):
         st.caption("海外へ移動した際などに変更してください。")
         tz_options = ["Asia/Tokyo", "UTC", "US/Pacific", "Europe/London", "Asia/Shanghai"]
@@ -209,39 +231,6 @@ if st.session_state.current_page == "settings":
             else:
                 st.error("❌ credentials.json ファイルが見つかりません。")
 
-    with st.expander("🚉 出発駅リストの管理", expanded=False):
-        st.caption("登録済みの駅の確認と削除ができます。")
-        for idx, row in st.session_state.station_df.iterrows():
-            col_name, col_del = st.columns([4, 1], vertical_alignment="center")
-            with col_name: 
-                st.markdown(f"**{row['順番']}. {row['出発駅名']}**")
-            with col_del:
-                if st.button("🗑️", key=f"del_sta_sb_{idx}", use_container_width=True):
-                    save_to_history()
-                    st.session_state.station_df = st.session_state.station_df.drop(idx).reset_index(drop=True)
-                    st.session_state.station_df["順番"] = range(1, len(st.session_state.station_df) + 1)
-                    st.rerun()
-        st.divider()
-        st.caption("💡 新しい駅を追加")
-        st.text_input("駅名を入力", key="new_station_input_sb", placeholder="例：箱根板橋", label_visibility="collapsed")
-        st.button("➕ 追加", key="add_station_btn_sb", use_container_width=True, on_click=add_new_station_sb_callback)
-
-        if st.session_state.station_history:
-            st.divider()
-            st.caption("⏪ 変更履歴の管理（直近5件）")
-            for i, h in enumerate(st.session_state.station_history):
-                st.markdown(f"**{i+1}: {h['time']} の状態**")
-                col_res, col_del = st.columns(2)
-                with col_res:
-                    if st.button("⏪ 復元", key=f"hist_res_sb_{i}", use_container_width=True):
-                        st.session_state.station_df = h["data"]
-                        st.rerun()
-                with col_del:
-                    if st.button("🗑️ 削除", key=f"hist_del_sb_{i}", use_container_width=True):
-                        st.session_state.station_history.pop(i)
-                        st.rerun()
-                st.write("")
-
     with st.expander("📅 登録先カレンダーの管理", expanded=False):
         st.caption("Googleカレンダーの「カレンダーID」を登録します。")
         for idx, row in st.session_state.calendar_df.iterrows():
@@ -276,6 +265,92 @@ if st.session_state.current_page == "settings":
                         st.session_state.calendar_history.pop(i)
                         st.rerun()
                 st.write("")
+
+    st.write("---")
+    
+    # --- 【UI改善】詳細画面への遷移ボタン群 ---
+    st.caption("詳細設定")
+    # CSSを使ってボタンのテキストを左寄せにするラッパーを使用
+    st.markdown('<div class="menu-button">', unsafe_allow_html=True)
+    st.button("🚉 出発駅リストの管理  ＞", on_click=go_to_settings_stations, use_container_width=True)
+    st.button("🏠 徒歩時間ワンタッチボタンの管理  ＞", on_click=go_to_settings_presets, use_container_width=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+
+# ------------------------------------------
+# A-2. 個別設定画面（出発駅リストの管理）
+# ------------------------------------------
+elif st.session_state.current_page == "settings_stations":
+    
+    st.button("◀️ 管理メニューに戻る", on_click=go_to_settings, type="secondary", use_container_width=True)
+    
+    st.title("🚉 出発駅リストの管理")
+    st.caption("登録済みの駅の確認と削除ができます。")
+    st.write("---")
+
+    for idx, row in st.session_state.station_df.iterrows():
+        col_name, col_del = st.columns([4, 1], vertical_alignment="center")
+        with col_name: 
+            st.markdown(f"**{row['順番']}. {row['出発駅名']}**")
+        with col_del:
+            if st.button("🗑️", key=f"del_sta_sub_{idx}", use_container_width=True):
+                save_to_history()
+                st.session_state.station_df = st.session_state.station_df.drop(idx).reset_index(drop=True)
+                st.session_state.station_df["順番"] = range(1, len(st.session_state.station_df) + 1)
+                st.rerun()
+                
+    st.divider()
+    st.subheader("💡 新しい駅を追加")
+    st.text_input("駅名を入力", key="new_station_input_sb", placeholder="例：箱根板橋")
+    st.button("➕ 追加する", key="add_station_btn_sub", type="primary", use_container_width=True, on_click=add_new_station_sb_callback)
+
+    if st.session_state.station_history:
+        st.divider()
+        st.subheader("⏪ 変更履歴の管理（直近5件）")
+        for i, h in enumerate(st.session_state.station_history):
+            st.markdown(f"**{i+1}: {h['time']} の状態**")
+            col_res, col_del = st.columns(2)
+            with col_res:
+                if st.button("⏪ 復元", key=f"hist_res_sub_{i}", use_container_width=True):
+                    st.session_state.station_df = h["data"]
+                    st.rerun()
+            with col_del:
+                if st.button("🗑️ 削除", key=f"hist_del_sub_{i}", use_container_width=True):
+                    st.session_state.station_history.pop(i)
+                    st.rerun()
+            st.write("")
+
+
+# ------------------------------------------
+# A-3. 個別設定画面（徒歩時間ワンタッチボタンの管理）
+# ------------------------------------------
+elif st.session_state.current_page == "settings_presets":
+    
+    st.button("◀️ 管理メニューに戻る", on_click=go_to_settings, type="secondary", use_container_width=True)
+    
+    st.title("🏠 徒歩時間ボタンの管理")
+    st.caption("自宅等からの徒歩時間のワンタッチボタンを確認・削除できます。")
+    st.write("---")
+
+    for i, preset in enumerate(st.session_state.walk_presets):
+        c1, c2, c3 = st.columns([3, 2, 2], vertical_alignment="center")
+        with c1: st.markdown(f"**{preset['name']}**")
+        with c2: st.markdown(f"{preset['time']}分")
+        with c3:
+            if st.button("🗑️ 削除", key=f"del_preset_sub_{i}", use_container_width=True):
+                st.session_state.walk_presets.pop(i)
+                st.rerun()
+                
+    st.divider()
+    st.subheader("💡 新しいボタンを追加")
+    if len(st.session_state.walk_presets) < 6:
+        c1, c2, c3 = st.columns([3, 2, 2], vertical_alignment="bottom")
+        with c1: st.text_input("表示名", key="new_p_name_input_sb", placeholder="例: コンビニ")
+        with c2: st.number_input("分", min_value=1, value=10, step=1, key="new_p_time_input_sb")
+        with c3: st.button("➕ 追加する", key="add_preset_btn_sub", type="primary", use_container_width=True, on_click=add_new_preset_sb_callback)
+    else:
+        st.warning("登録できるワンタッチボタンは最大6件までです。上のリストから不要なものを削除してください。")
+
 
 # ------------------------------------------
 # B. メイン画面（スケジュール登録画面）
@@ -324,7 +399,6 @@ elif st.session_state.current_page == "main":
             if on_change_callback: on_change_callback()
 
         st.markdown(f"<div style='text-align:center; font-size:14px; color:gray;'>{label}</div>", unsafe_allow_html=True)
-        # --- 【UI動作変更】▲を押すと時間が戻る(decrement)、▼を押すと時間が進む(increment) ---
         st.button("▲", key=f"up_{state_key}", on_click=decrement, use_container_width=True)
         st.text_input("hidden", key=input_key, label_visibility="collapsed", on_change=manual_update)
         st.button("▼", key=f"down_{state_key}", on_click=increment, use_container_width=True)
@@ -446,7 +520,7 @@ elif st.session_state.current_page == "main":
             display_sta = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else "〇〇"
             st.success(f"🚃 **{display_sta}駅** に **{train_deadline_dt.strftime('%H:%M')}** までに到着する電車を探します。")
 
-        with st.expander("🚃 STEP 3: ルート検索と電車の時刻入力", expanded=False):
+        with st.expander("🚃 STEP 3: ルート検索と電車の時刻入力", expanded=True):
             st.write("▼ 📍 現在地から出発駅を探す")
             if st.toggle("🌍 GPSを起動して現在地を取得する", value=False):
                 loc = streamlit_js_eval(js_expressions="new Promise((res, rej) => { navigator.geolocation.getCurrentPosition((p) => { res({lat: p.coords.latitude, lng: p.coords.longitude}); }, (e) => { res({error: e.message}); }, {enableHighAccuracy: true, timeout: 10000, maximumAge: 0}); })", key="gps_promise_fetch")
@@ -542,30 +616,20 @@ elif st.session_state.current_page == "main":
     st.write("---")
     st.write("▼ 🏠 自宅からの徒歩時間（ワンタッチ入力）")
 
-    if "walk_presets" not in st.session_state:
-        st.session_state.walk_presets = [{"name": "井細田", "time": 5}, {"name": "足柄", "time": 15}, {"name": "小田原", "time": 28}]
-
     cols = st.columns(3)
     for i, preset in enumerate(st.session_state.walk_presets):
         with cols[i % 3]:
             st.button(f"🏠 {preset['name']} ({preset['time']}分)", on_click=set_walk_time_callback, args=(preset['time'],), key=f"preset_btn_{i}", use_container_width=True)
 
-    with st.expander("⚙️ ワンタッチボタンの編集（追加・削除）"):
-        st.caption("【削除】不要なボタンは横の削除ボタンで消せます。")
-        for i, preset in enumerate(st.session_state.walk_presets):
-            c1, c2, c3 = st.columns([3, 2, 2], vertical_alignment="center")
-            with c1: st.markdown(f"**{preset['name']}**")
-            with c2: st.markdown(f"{preset['time']}分")
-            with c3:
-                if st.button("🗑️ 削除", key=f"del_preset_{i}", use_container_width=True):
-                    st.session_state.walk_presets.pop(i)
-                    st.rerun()
-        st.divider()
+    with st.expander("➕ ワンタッチボタンの追加", expanded=False):
+        st.caption("💡 新しいボタンを追加します。（リストの確認・削除は右上の「⚙️ 設定」メニューから）")
         if len(st.session_state.walk_presets) < 6:
             c1, c2, c3 = st.columns([3, 2, 2], vertical_alignment="bottom")
             with c1: st.text_input("表示名", key="new_p_name_input", placeholder="例: コンビニ")
             with c2: st.number_input("分", min_value=1, value=10, step=1, key="new_p_time_input")
             with c3: st.button("➕ 追加", key="add_preset_btn", use_container_width=True, on_click=add_new_preset_callback)
+        else:
+            st.warning("登録できるワンタッチボタンは最大6件までです。設定画面から不要なものを削除してください。")
 
     st.write("---")
 

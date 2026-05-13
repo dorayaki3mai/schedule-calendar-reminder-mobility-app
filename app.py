@@ -10,7 +10,6 @@ import os.path
 import os
 # タイムゾーン操作用
 import pytz
-# --- 【バグ修正】API連続呼び出し制限を回避するためのtimeモジュール ---
 import time as sys_time
 # Google Calendar API連携用
 from google.auth.transport.requests import Request
@@ -32,7 +31,6 @@ div[data-baseweb="input"] input {
     font-size: 18px;
     font-weight: bold;
 }
-/* 設定メニュー等のボタンを左寄せにするためのCSS調整 */
 .menu-button button {
     justify-content: flex-start !important;
 }
@@ -43,35 +41,21 @@ div[data-baseweb="input"] input {
 # データ管理系の初期化
 # ==========================================
 
-if "current_page" not in st.session_state:
-    st.session_state.current_page = "main"
+if "current_page" not in st.session_state: st.session_state.current_page = "main"
 
-def go_to_main():
-    st.session_state.current_page = "main"
+def go_to_main(): st.session_state.current_page = "main"
+def go_to_settings(): st.session_state.current_page = "settings"
+def go_to_settings_stations(): st.session_state.current_page = "settings_stations"
+def go_to_settings_presets(): st.session_state.current_page = "settings_presets"
+def go_to_settings_calendars(): st.session_state.current_page = "settings_calendars"
 
-def go_to_settings():
-    st.session_state.current_page = "settings"
-
-def go_to_settings_stations():
-    st.session_state.current_page = "settings_stations"
-
-def go_to_settings_presets():
-    st.session_state.current_page = "settings_presets"
-
-def go_to_settings_calendars():
-    st.session_state.current_page = "settings_calendars"
-
-if "walk_time_train" not in st.session_state:
-    st.session_state.walk_time_train = 15
-if "walk_time_direct" not in st.session_state:
-    st.session_state.walk_time_direct = 15
+if "walk_time_train" not in st.session_state: st.session_state.walk_time_train = 15
+if "walk_time_direct" not in st.session_state: st.session_state.walk_time_direct = 15
 
 if "walk_presets" not in st.session_state:
     st.session_state.walk_presets = [{"name": "井細田", "time": 5}, {"name": "足柄", "time": 15}, {"name": "小田原", "time": 28}]
 
-# --- 出発駅用 ---
-if "station_history" not in st.session_state:
-    st.session_state.station_history = []
+if "station_history" not in st.session_state: st.session_state.station_history = []
 if "station_df" not in st.session_state:
     st.session_state.station_df = pd.DataFrame([
         {"順番": 1, "出発駅名": "井細田"},
@@ -79,9 +63,7 @@ if "station_df" not in st.session_state:
         {"順番": 3, "出発駅名": "小田原"}
     ])
 
-if "app_timezone" not in st.session_state:
-    st.session_state.app_timezone = "Asia/Tokyo"
-
+if "app_timezone" not in st.session_state: st.session_state.app_timezone = "Asia/Tokyo"
 app_tz = pytz.timezone(st.session_state.app_timezone)
 now_with_tz = datetime.now(app_tz)
 
@@ -92,9 +74,7 @@ def save_to_history():
     if len(st.session_state.station_history) > 5:
         st.session_state.station_history = st.session_state.station_history[:5]
 
-# --- カレンダー管理用 ---
-if "calendar_history" not in st.session_state:
-    st.session_state.calendar_history = []
+if "calendar_history" not in st.session_state: st.session_state.calendar_history = []
 if "calendar_df" not in st.session_state:
     st.session_state.calendar_df = pd.DataFrame([
         {"順番": 1, "カレンダー名": "メインカレンダー", "カレンダーID": "primary"}
@@ -110,6 +90,10 @@ if "cal_sel_main" not in st.session_state: st.session_state.cal_sel_main = 0
 if "include_train_event" not in st.session_state: st.session_state.include_train_event = True
 if "include_buffer_event" not in st.session_state: st.session_state.include_buffer_event = True
 
+# --- 【認証機能改修】セッション（ブラウザ）ごとに鍵を記憶するための変数 ---
+if "google_creds" not in st.session_state: st.session_state.google_creds = None
+
+
 def save_cal_to_history():
     snapshot = st.session_state.calendar_df.copy()
     timestamp = datetime.now(app_tz).strftime("%Y/%m/%d %H:%M:%S")
@@ -117,20 +101,12 @@ def save_cal_to_history():
     if len(st.session_state.calendar_history) > 5:
         st.session_state.calendar_history = st.session_state.calendar_history[:5]
 
-# ==========================================
-# 安全な追加・同期用のコールバック関数
-# ==========================================
-
 def update_cal_sel(state_key, widget_key):
     selected_val = st.session_state[widget_key]
     cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
-    if not cal_options_display:
-        cal_options_display = ["メインカレンダー"]
-    
-    try:
-        st.session_state[state_key] = cal_options_display.index(selected_val)
-    except ValueError:
-        st.session_state[state_key] = 0
+    if not cal_options_display: cal_options_display = ["メインカレンダー"]
+    try: st.session_state[state_key] = cal_options_display.index(selected_val)
+    except ValueError: st.session_state[state_key] = 0
 
 def get_safe_cal_idx(state_key, options_list):
     idx = st.session_state.get(state_key, 0)
@@ -185,14 +161,9 @@ def add_new_preset_sb_callback():
         st.session_state.new_p_name_input_sb = ""
         st.session_state.new_p_time_input_sb = 10
 
-def set_depart_station_callback(sta):
-    st.session_state.selected_depart_station = sta
-
-def update_depart_station_from_sb():
-    st.session_state.selected_depart_station = st.session_state.sb_depart_station
-
-def update_timezone():
-    st.session_state.app_timezone = st.session_state.tz_selector
+def set_depart_station_callback(sta): st.session_state.selected_depart_station = sta
+def update_depart_station_from_sb(): st.session_state.selected_depart_station = st.session_state.sb_depart_station
+def update_timezone(): st.session_state.app_timezone = st.session_state.tz_selector
 
 
 # ==========================================
@@ -203,15 +174,11 @@ def update_timezone():
 # A-1. 設定メニュー一覧画面
 # ------------------------------------------
 if st.session_state.current_page == "settings":
-    
     st.button("◀️ メイン画面に戻る", on_click=go_to_main, type="primary", use_container_width=True)
-    
     st.title("⚙️ 管理メニュー")
-    st.caption("アプリの各種設定やデータの管理を行います。")
     st.write("---")
 
     with st.expander("🌍 一般設定 (タイムゾーン)", expanded=False):
-        st.caption("海外へ移動した際などに変更してください。")
         tz_options = ["Asia/Tokyo", "UTC", "US/Pacific", "Europe/London", "Asia/Shanghai"]
         current_tz_index = tz_options.index(st.session_state.app_timezone) if st.session_state.app_timezone in tz_options else 0
         st.selectbox("基準タイムゾーン", tz_options, index=current_tz_index, key="tz_selector", on_change=update_timezone)
@@ -219,19 +186,32 @@ if st.session_state.current_page == "settings":
     with st.expander("👤 カレンダーアカウント連携", expanded=False):
         st.caption("連携しているGoogleアカウントの接続解除・切り替えを行います。")
         SCOPES = ['https://www.googleapis.com/auth/calendar']
-        if os.path.exists('token.json'):
-            st.success("✅ 現在のアカウントは連携済みです")
+        
+        # --- 【認証機能改修】状態の判定順序の変更（セッション優先） ---
+        is_authenticated = False
+        auth_method = ""
+
+        if st.session_state.google_creds is not None:
+            is_authenticated = True
+            auth_method = "📱 このブラウザで連携されています"
+        elif os.path.exists('token.json'):
+            is_authenticated = True
+            auth_method = "💻 ローカルファイルで連携されています"
+        elif "GOOGLE_TOKEN_JSON" in st.secrets:
+            is_authenticated = True
+            auth_method = "☁️ クラウドの固定シークレットで連携されています"
+
+        if is_authenticated:
+            st.success(f"✅ 現在のアカウントは連携済みです\n\n({auth_method})")
             if st.button("🗑️ アカウント連携を解除する", use_container_width=True):
                 try:
-                    os.remove('token.json')
-                    if "oauth_flow" in st.session_state:
-                        del st.session_state["oauth_flow"]
+                    if os.path.exists('token.json'): os.remove('token.json')
+                    st.session_state.google_creds = None # セッションも消去
+                    if "oauth_flow" in st.session_state: del st.session_state["oauth_flow"]
                     st.success("連携を解除しました。")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"ファイルの削除に失敗しました: {e}")
-        elif "GOOGLE_TOKEN_JSON" in st.secrets:
-            st.info("ℹ️ クラウドのシークレット(Secrets)で連携されています。")
+                    st.error(f"解除処理に失敗しました: {e}")
         else:
             st.warning("⚠️ 現在アカウントは連携されていません")
             if os.path.exists('credentials.json'):
@@ -249,8 +229,10 @@ if st.session_state.current_page == "settings":
                         flow = st.session_state.oauth_flow
                         flow.fetch_token(code=auth_code)
                         creds = flow.credentials
-                        with open('token.json', 'w') as token:
-                            token.write(creds.to_json())
+                        # --- 【認証機能改修】取得した鍵をブラウザ(Session)に記憶させる ---
+                        st.session_state.google_creds = creds.to_json()
+                        # バックアップとしてファイルにも書き出す
+                        with open('token.json', 'w') as token: token.write(creds.to_json())
                         st.success("✅ 認証成功！メイン画面からカレンダーに登録できます。")
                         st.rerun()
                     except Exception as e:
@@ -259,7 +241,6 @@ if st.session_state.current_page == "settings":
                 st.error("❌ credentials.json ファイルが見つかりません。")
 
     st.write("---")
-    
     st.caption("詳細設定")
     st.markdown('<div class="menu-button">', unsafe_allow_html=True)
     st.button("📅 登録先カレンダーの管理  ＞", on_click=go_to_settings_calendars, use_container_width=True)
@@ -267,22 +248,16 @@ if st.session_state.current_page == "settings":
     st.button("🏠 徒歩時間ワンタッチボタンの管理  ＞", on_click=go_to_settings_presets, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
-
 # ------------------------------------------
 # A-2. 個別設定画面（登録先カレンダーの管理）
 # ------------------------------------------
 elif st.session_state.current_page == "settings_calendars":
-    
     st.button("◀️ 管理メニューに戻る", on_click=go_to_settings, type="secondary", use_container_width=True)
-    
     st.title("📅 登録先カレンダーの管理")
-    st.caption("Googleカレンダーの「カレンダーID」を追加・削除します。")
     st.write("---")
-
     for idx, row in st.session_state.calendar_df.iterrows():
         col_name, col_del = st.columns([4, 1], vertical_alignment="center")
-        with col_name: 
-            st.markdown(f"**{row['順番']}. {row['カレンダー名']}**<br><span style='font-size:11px; color:gray;'>{row['カレンダーID']}</span>", unsafe_allow_html=True)
+        with col_name: st.markdown(f"**{row['順番']}. {row['カレンダー名']}**<br><span style='font-size:11px; color:gray;'>{row['カレンダーID']}</span>", unsafe_allow_html=True)
         with col_del:
             if row['カレンダーID'] != 'primary':
                 if st.button("🗑️", key=f"del_cal_sub_{idx}", use_container_width=True):
@@ -316,10 +291,8 @@ elif st.session_state.current_page == "settings_calendars":
     st.divider()
     st.subheader("⚙️ 工程ごとの登録先カレンダー設定")
     st.caption("各予定をどのカレンダーに振り分けるかのデフォルトを設定します。")
-    
     cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
-    if not cal_options_display:
-        cal_options_display = ["メインカレンダー"]
+    if not cal_options_display: cal_options_display = ["メインカレンダー"]
 
     with st.container(border=True):
         st.selectbox("① 🏠 準備", cal_options_display, index=get_safe_cal_idx("cal_sel_prep", cal_options_display), key="cal_sel_prep_widget_set", on_change=update_cal_sel, args=("cal_sel_prep", "cal_sel_prep_widget_set"))
@@ -329,39 +302,31 @@ elif st.session_state.current_page == "settings_calendars":
         st.selectbox("⑤ ⏳ 待機（バッファ）", cal_options_display, index=get_safe_cal_idx("cal_sel_buffer", cal_options_display), key="cal_sel_buffer_widget_set", on_change=update_cal_sel, args=("cal_sel_buffer", "cal_sel_buffer_widget_set"))
         st.selectbox("⑥ 🎯 本番の予定", cal_options_display, index=get_safe_cal_idx("cal_sel_main", cal_options_display), key="cal_sel_main_widget_set", on_change=update_cal_sel, args=("cal_sel_main", "cal_sel_main_widget_set"))
 
-
 # ------------------------------------------
 # A-3. 個別設定画面（出発駅リストの管理）
 # ------------------------------------------
 elif st.session_state.current_page == "settings_stations":
-    
     st.button("◀️ 管理メニューに戻る", on_click=go_to_settings, type="secondary", use_container_width=True)
-    
     st.title("🚉 出発駅リストの管理")
-    st.caption("登録済みの駅の確認と削除ができます。")
     st.write("---")
-
     for idx, row in st.session_state.station_df.iterrows():
         col_name, col_del = st.columns([4, 1], vertical_alignment="center")
-        with col_name: 
-            st.markdown(f"**{row['順番']}. {row['出発駅名']}**")
+        with col_name: st.markdown(f"**{row['順番']}. {row['出発駅名']}**")
         with col_del:
             if st.button("🗑️", key=f"del_sta_sub_{idx}", use_container_width=True):
                 save_to_history()
                 st.session_state.station_df = st.session_state.station_df.drop(idx).reset_index(drop=True)
                 st.session_state.station_df["順番"] = range(1, len(st.session_state.station_df) + 1)
                 st.rerun()
-                
     st.divider()
     st.subheader("💡 新しい駅を追加")
     st.text_input("駅名を入力", key="new_station_input_sb", placeholder="例：箱根板橋")
     st.button("➕ 追加する", key="add_station_btn_sub", type="primary", use_container_width=True, on_click=add_new_station_sb_callback)
-
     if st.session_state.station_history:
         st.divider()
-        st.subheader("⏪ 変更履歴の管理（直近5件）")
+        st.subheader("⏪ 変更履歴の管理")
         for i, h in enumerate(st.session_state.station_history):
-            st.markdown(f"**{i+1}: {h['time']} の状態**")
+            st.markdown(f"**{i+1}: {h['time']}**")
             col_res, col_del = st.columns(2)
             with col_res:
                 if st.button("⏪ 復元", key=f"hist_res_sub_{i}", use_container_width=True):
@@ -373,18 +338,13 @@ elif st.session_state.current_page == "settings_stations":
                     st.rerun()
             st.write("")
 
-
 # ------------------------------------------
 # A-4. 個別設定画面（徒歩時間ワンタッチボタンの管理）
 # ------------------------------------------
 elif st.session_state.current_page == "settings_presets":
-    
     st.button("◀️ 管理メニューに戻る", on_click=go_to_settings, type="secondary", use_container_width=True)
-    
     st.title("🏠 徒歩時間ボタンの管理")
-    st.caption("自宅等からの徒歩時間のワンタッチボタンを確認・削除できます。")
     st.write("---")
-
     for i, preset in enumerate(st.session_state.walk_presets):
         c1, c2, c3 = st.columns([3, 2, 2], vertical_alignment="center")
         with c1: st.markdown(f"**{preset['name']}**")
@@ -393,7 +353,6 @@ elif st.session_state.current_page == "settings_presets":
             if st.button("🗑️ 削除", key=f"del_preset_sub_{i}", use_container_width=True):
                 st.session_state.walk_presets.pop(i)
                 st.rerun()
-                
     st.divider()
     st.subheader("💡 新しいボタンを追加")
     if len(st.session_state.walk_presets) < 6:
@@ -402,8 +361,7 @@ elif st.session_state.current_page == "settings_presets":
         with c2: st.number_input("分", min_value=1, value=10, step=1, key="new_p_time_input_sb")
         with c3: st.button("➕ 追加する", key="add_preset_btn_sub", type="primary", use_container_width=True, on_click=add_new_preset_sb_callback)
     else:
-        st.warning("登録できるワンタッチボタンは最大6件までです。上のリストから不要なものを削除してください。")
-
+        st.warning("登録できるワンタッチボタンは最大6件までです。")
 
 # ------------------------------------------
 # B. メイン画面（スケジュール登録画面）
@@ -411,13 +369,10 @@ elif st.session_state.current_page == "settings_presets":
 elif st.session_state.current_page == "main":
 
     col_title, col_settings = st.columns([4, 1], vertical_alignment="center")
-    with col_title:
-        st.title("🗓 移動ルーター")
-    with col_settings:
-        st.button("⚙️ 設定", on_click=go_to_settings, use_container_width=True)
+    with col_title: st.title("🗓 移動ルーター")
+    with col_settings: st.button("⚙️ 設定", on_click=go_to_settings, use_container_width=True)
 
     st.write(f"現在の設定時刻: **{now_with_tz.strftime('%Y/%m/%d %H:%M:%S')}** ({st.session_state.app_timezone})")
-    st.write("確実な手順で、嘘のないスケジュールをカレンダーに登録します。")
 
     def clean_address(addr):
         if not addr: return ""
@@ -428,7 +383,6 @@ elif st.session_state.current_page == "main":
 
     def render_hybrid_time_picker(label, state_key, max_value, on_change_callback=None):
         input_key = f"input_{state_key}"
-        
         if input_key not in st.session_state and state_key in st.session_state:
             st.session_state[input_key] = st.session_state[state_key]
 
@@ -463,12 +417,8 @@ elif st.session_state.current_page == "main":
 
     event_title = st.text_input("予定のタイトル", "")
     facility_name = st.text_input("施設名（目的地）", "")
-    
     if facility_name:
-        st.link_button(
-            f"🗺️ 「{facility_name}」をGoogleマップで探す", 
-            f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(facility_name)}"
-        )
+        st.link_button(f"🗺️ 「{facility_name}」をGoogleマップで探す", f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(facility_name)}")
 
     event_address_full = st.text_input("目的地住所（ビル・マンション名まで含む）", "")
     cleaned_address = clean_address(event_address_full)
@@ -483,15 +433,12 @@ elif st.session_state.current_page == "main":
     st.write("---")
     event_date = st.date_input("予定の日付", datetime.today())
 
-    if "start_h" not in st.session_state:
-        st.session_state.start_h = now_with_tz.strftime("%H"); st.session_state.input_start_h = st.session_state.start_h
-    if "start_m" not in st.session_state:
-        st.session_state.start_m = now_with_tz.strftime("%M"); st.session_state.input_start_m = st.session_state.start_m
+    if "start_h" not in st.session_state: st.session_state.start_h = now_with_tz.strftime("%H"); st.session_state.input_start_h = st.session_state.start_h
+    if "start_m" not in st.session_state: st.session_state.start_m = now_with_tz.strftime("%M"); st.session_state.input_start_m = st.session_state.start_m
     if "end_h" not in st.session_state:
         init_end = now_with_tz + timedelta(hours=1)
         st.session_state.end_h = init_end.strftime("%H"); st.session_state.input_end_h = st.session_state.end_h
-    if "end_m" not in st.session_state:
-        st.session_state.end_m = now_with_tz.strftime("%M"); st.session_state.input_end_m = st.session_state.end_m
+    if "end_m" not in st.session_state: st.session_state.end_m = now_with_tz.strftime("%M"); st.session_state.input_end_m = st.session_state.end_m
 
     def sync_end_time():
         h = int(st.session_state.start_h)
@@ -525,8 +472,7 @@ elif st.session_state.current_page == "main":
     # ==========================================
     st.write("---")
     st.write("▼ 🚶 移動手段の選択")
-    if "travel_mode" not in st.session_state: 
-        st.session_state.travel_mode = "🚃 電車を利用する"
+    if "travel_mode" not in st.session_state: st.session_state.travel_mode = "🚃 電車を利用する"
 
     c1, c2 = st.columns(2)
     with c1:
@@ -537,12 +483,8 @@ elif st.session_state.current_page == "main":
             st.session_state.travel_mode = "🚶 徒歩のみ"; st.rerun()
 
     travel_mode = st.session_state.travel_mode
-
     train_depart_time = None; train_arrive_time = None; depart_station = ""; walk_to_dest = 0
-
-    if "arrival_station_input" not in st.session_state:
-        st.session_state.arrival_station_input = ""
-
+    if "arrival_station_input" not in st.session_state: st.session_state.arrival_station_input = ""
 
     # ==========================================
     # STEP 2 & 3
@@ -556,7 +498,6 @@ elif st.session_state.current_page == "main":
 
             st.write("▼ 🚉 目的地の近隣駅を入力")
             st.text_input("地図を確認して近隣駅（降車駅）を入力してください", key="arrival_station_input")
-
             current_arrival_station = st.session_state.arrival_station_input
 
             if current_arrival_station and search_destination:
@@ -573,11 +514,8 @@ elif st.session_state.current_page == "main":
             display_sta = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else "〇〇"
             st.success(f"🚃 **{display_sta}駅** に **{train_deadline_dt.strftime('%H:%M')}** までに到着する電車を探します。")
 
-        valid_stations = [s for s in st.session_state.station_df["出発駅名"].tolist() if s and str(s).strip() != ""]
-        valid_stations = valid_stations[::-1]
-        
+        valid_stations = [s for s in st.session_state.station_df["出発駅名"].tolist() if s and str(s).strip() != ""][::-1]
         if not valid_stations: valid_stations = ["駅名を入力してください"]
-        
         if "selected_depart_station" not in st.session_state or st.session_state.selected_depart_station not in valid_stations:
             st.session_state.selected_depart_station = valid_stations[0]
 
@@ -594,40 +532,23 @@ elif st.session_state.current_page == "main":
 
             st.write("---")
             st.write("▼ 出発駅の追加")
-            st.caption("💡 新しい駅を追加する場合は入力してボタンを押してください。（リストの確認・削除は右上の「⚙️ 設定」メニューから）")
             c1, c2 = st.columns([3, 1])
             with c1: st.text_input("駅名を入力", key="new_station_input", label_visibility="collapsed", placeholder="例：箱根板橋")
             with c2: st.button("➕ 追加", key="add_station_btn", use_container_width=True, on_click=add_new_station_callback)
 
             st.write("---")
             st.write("▼ リストから選択")
-            st.caption("登録されているすべての駅から選択します。")
             current_index = valid_stations.index(st.session_state.selected_depart_station) if st.session_state.selected_depart_station in valid_stations else 0
-            st.selectbox(
-                "出発駅", 
-                valid_stations, 
-                index=current_index, 
-                key="sb_depart_station",
-                on_change=update_depart_station_from_sb,
-                label_visibility="collapsed"
-            )
+            st.selectbox("出発駅", valid_stations, index=current_index, key="sb_depart_station", on_change=update_depart_station_from_sb, label_visibility="collapsed")
 
         with st.expander("🚃 STEP 3: ルート検索と電車の時刻入力", expanded=True):
             st.write("▼ 今回利用する出発駅を選択（ワンタッチ）")
-            
             btn_stations = valid_stations[:6]
             cols = st.columns(3)
             for i, sta in enumerate(btn_stations):
                 with cols[i % 3]:
                     is_selected = (st.session_state.selected_depart_station == sta)
-                    st.button(
-                        sta, 
-                        key=f"btn_sel_sta_{i}", 
-                        type="primary" if is_selected else "secondary", 
-                        use_container_width=True, 
-                        on_click=set_depart_station_callback, 
-                        args=(sta,)
-                    )
+                    st.button(sta, key=f"btn_sel_sta_{i}", type="primary" if is_selected else "secondary", use_container_width=True, on_click=set_depart_station_callback, args=(sta,))
 
             depart_station = st.session_state.selected_depart_station
             clean_arrival_sta_for_jorudan = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else ""
@@ -640,11 +561,10 @@ elif st.session_state.current_page == "main":
             st.write("---")
             st.write("▼ 調べた電車の時刻を入力してください")
 
-            if "train_dep_h" not in st.session_state:
-                st.session_state.train_dep_h = now_with_tz.strftime("%H"); st.session_state.input_train_dep_h = st.session_state.train_dep_h
-                st.session_state.train_dep_m = now_with_tz.strftime("%M"); st.session_state.input_train_dep_m = st.session_state.train_dep_m
-                st.session_state.train_arr_h = now_with_tz.strftime("%H"); st.session_state.input_train_arr_h = st.session_state.train_arr_h
-                st.session_state.train_arr_m = now_with_tz.strftime("%M"); st.session_state.input_train_arr_m = st.session_state.train_arr_m
+            if "train_dep_h" not in st.session_state: st.session_state.train_dep_h = now_with_tz.strftime("%H"); st.session_state.input_train_dep_h = st.session_state.train_dep_h
+            if "train_dep_m" not in st.session_state: st.session_state.train_dep_m = now_with_tz.strftime("%M"); st.session_state.input_train_dep_m = st.session_state.train_dep_m
+            if "train_arr_h" not in st.session_state: st.session_state.train_arr_h = now_with_tz.strftime("%H"); st.session_state.input_train_arr_h = st.session_state.train_arr_h
+            if "train_arr_m" not in st.session_state: st.session_state.train_arr_m = now_with_tz.strftime("%M"); st.session_state.input_train_arr_m = st.session_state.train_arr_m
 
             def sync_train_arrive_time():
                 st.session_state.train_arr_h = st.session_state.train_dep_h; st.session_state.input_train_arr_h = st.session_state.train_dep_h
@@ -663,7 +583,6 @@ elif st.session_state.current_page == "main":
                 with c1: render_hybrid_time_picker("時", "train_arr_h", 24)
                 with c2: render_hybrid_time_picker("分", "train_arr_m", 60)
             train_arrive_time = time(int(st.session_state.train_arr_h), int(st.session_state.train_arr_m))
-
 
     # ==========================================
     # STEP 4: 出発前の準備
@@ -692,10 +611,8 @@ elif st.session_state.current_page == "main":
     if travel_mode == "🚃 電車を利用する":
         walk_to_station = st.number_input("現在地から【利用する出発駅】までの徒歩時間（分）", key="walk_time_train", step=1)
         prep_time = st.number_input("移動前の準備（仕度）時間（分）", value=15, step=1, key="prep_time_train")
-        
         leave_home_dt = datetime.combine(event_date, train_depart_time) - timedelta(minutes=walk_to_station)
         start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
-
     else:
         st.write("▼ 🗺️ 目的地までの徒歩ルートと時間を確認")
         if st.toggle("🌍 GPSを起動して現在地を取得する", key="use_gps_walk", value=False):
@@ -706,18 +623,15 @@ elif st.session_state.current_page == "main":
                     st.success("✅ 位置情報の取得に成功しました！")
                     if search_destination:
                         st.link_button("🚶‍♂️ 取得した現在地からの徒歩ルートを確認", f"https://www.google.com/maps/dir/?api=1&origin={loc_walk['lat']},{loc_walk['lng']}&destination={urllib.parse.quote(search_destination)}&travelmode=walking", use_container_width=True)
-                        st.caption("※Googleマップで表示された「徒歩〇〇分」の数字を、下の入力欄にセットしてください。")
                     else: st.warning("目的地が入力されていません。")
             else: st.info("⌛ 位置情報を取得中...")
         else:
             if search_destination:
                 st.link_button("🚶‍♂️ 現在地から目的地までの徒歩ルートを確認", f"https://www.google.com/maps/dir/?api=1&destination={urllib.parse.quote(search_destination)}&travelmode=walking", use_container_width=True)
-                st.caption("※Googleマップで表示された「徒歩〇〇分」の数字を、下の入力欄にセットしてください。")
             else: st.warning("目的地が入力されていません。")
             
         walk_to_dest_direct = st.number_input("現在地から【目的地】までの総徒歩時間（分）", key="walk_time_direct", step=1)
         prep_time = st.number_input("移動前の準備（仕度）時間（分）", value=15, step=1, key="prep_time_direct")
-        
         leave_home_dt = target_arrival_dt - timedelta(minutes=walk_to_dest_direct)
         start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
 
@@ -736,7 +650,11 @@ elif st.session_state.current_page == "main":
             with st.spinner("Googleカレンダーに通信中（複数予定を登録します）..."):
                 SCOPES = ['https://www.googleapis.com/auth/calendar']
                 creds = None
-                if os.path.exists('token.json'):
+                
+                # --- 【認証機能改修】登録時も「セッション(記憶)」の鍵を最優先で使う ---
+                if st.session_state.google_creds is not None:
+                    creds = Credentials.from_authorized_user_info(json.loads(st.session_state.google_creds), SCOPES)
+                elif os.path.exists('token.json'):
                     creds = Credentials.from_authorized_user_file('token.json', SCOPES)
                 elif "GOOGLE_TOKEN_JSON" in st.secrets:
                     creds = Credentials.from_authorized_user_info(json.loads(st.secrets["GOOGLE_TOKEN_JSON"]), SCOPES)
@@ -751,8 +669,7 @@ elif st.session_state.current_page == "main":
                 service = build('calendar', 'v3', credentials=creds)
 
                 cal_options_ids = [f"{row['カレンダーID']}" for idx, row in st.session_state.calendar_df.iterrows()]
-                if not cal_options_ids:
-                    cal_options_ids = ["primary"]
+                if not cal_options_ids: cal_options_ids = ["primary"]
 
                 inc_train = st.session_state.include_train_event
                 inc_buffer = st.session_state.include_buffer_event
@@ -763,7 +680,6 @@ elif st.session_state.current_page == "main":
                 id_buffer = cal_options_ids[st.session_state.cal_sel_buffer] if st.session_state.cal_sel_buffer < len(cal_options_ids) else cal_options_ids[0]
                 id_main = cal_options_ids[st.session_state.cal_sel_main] if st.session_state.cal_sel_main < len(cal_options_ids) else cal_options_ids[0]
 
-                # --- 【バグ修正】0分の予定を1分に補正 ＆ 連続送信時の0.3秒スリープを追加 ---
                 def insert_event(summary, start_datetime, end_datetime, cal_id, location=""):
                     if start_datetime >= end_datetime:
                         end_datetime = start_datetime + timedelta(minutes=1)
@@ -773,7 +689,6 @@ elif st.session_state.current_page == "main":
                 if travel_mode == "🚃 電車を利用する":
                     train_arrive_dt = datetime.combine(event_date, train_arrive_time)
                     if train_arrive_dt < datetime.combine(event_date, train_depart_time): train_arrive_dt += timedelta(days=1)
-                    
                     actual_arrive_dt = train_arrive_dt + timedelta(minutes=walk_to_dest)
                     clean_arrival_sta_for_cal = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else ""
 
@@ -787,7 +702,6 @@ elif st.session_state.current_page == "main":
                         insert_event(f"⏳ 待機（バッファ）：{event_title}", actual_arrive_dt, event_dt, id_buffer, location=full_destination_target)
                         
                     insert_event(event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
-                    
                     st.success("✅ 準備から移動の詳細、本番までを各カレンダーに登録しました！")
 
                 else:
@@ -798,16 +712,15 @@ elif st.session_state.current_page == "main":
                         insert_event(f"⏳ 待機（バッファ）：{event_title}", target_arrival_dt, event_dt, id_buffer, location=full_destination_target)
 
                     insert_event(event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
-                    
                     st.success("✅ 準備、徒歩移動、本番の予定を各カレンダーに登録しました！")
 
             st.balloons()
-        # --- 【バグ修正・UI改善】404エラー時の親切なガイダンス表示 ---
+            
         except Exception as e:
             error_str = str(e)
             if "404" in error_str and "notFound" in error_str:
-                st.error("❌ 登録失敗: 指定された「カレンダーID」が見つからないか、連携中のアカウントにアクセス権限がありません。")
-                st.info("💡 **【解決策】**\n1. 右上の「⚙️ 設定」>「詳細設定」>「📅 登録先カレンダーの管理」で、登録したID（@group.calendar.google.comなど）に間違いや前後の空白がないか確認してください。\n2. 「👤 カレンダーアカウント連携」で現在ログインしているGoogleアカウントが、そのカレンダーの【変更権限】を持っているか確認してください。（別のアカウントでログインしている可能性があります）")
+                st.error("❌ 登録失敗: 指定された「カレンダーID」が見つからないか、アクセス権限がありません。")
+                st.info("💡 **【解決策】**\n1. 登録したカレンダーID（@group.calendar.google.comなど）に間違いがないか確認してください。\n2. 「⚙️ 設定」の「👤 カレンダーアカウント連携」を開き、一度【連携を解除】してから、再度お使いのGoogleアカウントで連携し直してください。")
             else:
                 st.error(f"❌ 登録失敗: {e}")
 
@@ -823,10 +736,8 @@ elif st.session_state.current_page == "main":
     st.write("---")
     with st.expander("▼ 工程ごとの登録先カレンダー設定", expanded=False):
         st.caption("各予定をどのカレンダーに振り分けるかを選択できます。（設定画面のデフォルト値が初期セットされています）")
-        
         cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
-        if not cal_options_display:
-            cal_options_display = ["メインカレンダー"]
+        if not cal_options_display: cal_options_display = ["メインカレンダー"]
 
         with st.container(border=True):
             st.selectbox("① 🏠 準備", cal_options_display, index=get_safe_cal_idx("cal_sel_prep", cal_options_display), key="cal_sel_prep_widget_main", on_change=update_cal_sel, args=("cal_sel_prep", "cal_sel_prep_widget_main"))

@@ -40,16 +40,81 @@ app_tz = pytz.timezone(selected_tz_str)
 
 now_with_tz = datetime.now(app_tz)
 
+# ==========================================
+# データ管理系の初期化（サイドバー用）
+# ==========================================
+if "station_history" not in st.session_state:
+    st.session_state.station_history = []
+if "station_df" not in st.session_state:
+    st.session_state.station_df = pd.DataFrame([
+        {"順番": 1, "出発駅名": "井細田"},
+        {"順番": 2, "出発駅名": "足柄(神奈川県)"},
+        {"順番": 3, "出発駅名": "小田原"}
+    ])
+
+def save_to_history():
+    snapshot = st.session_state.station_df.copy()
+    timestamp = datetime.now(app_tz).strftime("%Y/%m/%d %H:%M:%S")
+    st.session_state.station_history.insert(0, {"time": timestamp, "data": snapshot})
+    if len(st.session_state.station_history) > 5:
+        st.session_state.station_history = st.session_state.station_history[:5]
+
+# ==========================================
+# サイドバーに出発駅リストの管理メニューを配置
+# ==========================================
+st.sidebar.markdown("---")
+st.sidebar.header("🚉 出発駅リストの管理")
+st.sidebar.caption("登録済みの駅の確認と削除ができます。")
+
+for idx, row in st.session_state.station_df.iterrows():
+    col_name, col_del = st.sidebar.columns([4, 1], vertical_alignment="center")
+    with col_name: 
+        st.markdown(f"**{row['順番']}. {row['出発駅名']}**")
+    with col_del:
+        if st.button("🗑️", key=f"del_sta_sb_{idx}", use_container_width=True):
+            save_to_history()
+            st.session_state.station_df = st.session_state.station_df.drop(idx).reset_index(drop=True)
+            st.session_state.station_df["順番"] = range(1, len(st.session_state.station_df) + 1)
+            st.rerun()
+
+if st.session_state.station_history:
+    with st.sidebar.expander("⏪ 変更履歴の管理（直近5件）"):
+        for i, h in enumerate(st.session_state.station_history):
+            st.markdown(f"**{i+1}: {h['time']} の状態**")
+            col_res, col_del = st.columns(2)
+            with col_res:
+                if st.button("⏪ 復元", key=f"hist_res_sb_{i}", use_container_width=True):
+                    st.session_state.station_df = h["data"]
+                    st.rerun()
+            with col_del:
+                if st.button("🗑️ 削除", key=f"hist_del_sb_{i}", use_container_width=True):
+                    st.session_state.station_history.pop(i)
+                    st.rerun()
+            st.divider() 
+
 st.title("🗓 スケジュール＆移動ルーター")
 st.write(f"現在の設定時刻: **{now_with_tz.strftime('%Y/%m/%d %H:%M:%S')}** ({selected_tz_str})")
 st.write("確実な手順で、嘘のないスケジュールをカレンダーに登録します。")
 
-# --- 住所クレンジング関数 ---
+
+# ==========================================
+# --- 【機能改善】郵便番号に対応した住所クレンジング関数 ---
+# ==========================================
 def clean_address(addr):
     if not addr: return ""
+    
+    # 1. 郵便番号の除去（一番最初に行うことが重要）
+    # 〒マークの有無、全角・半角数字、ハイフンの種類を網羅し、前後のスペースごと空文字に置換して消し去る
+    addr = re.sub(r'〒?\s*[0-9０-９]{3}[-ー][0-9０-９]{4}\s*', '', addr)
+    
+    # 2. スペースによる分割（建物名などを落とす）
     addr = re.split(r'[ 　]', addr)[0]
+    
+    # 3. 番地以降の不要な枝葉（部屋番号など）を落とす
     addr = re.sub(r'([0-9０-９]+[-ー][0-9０-９]+[-ー][0-9０-９]+|[0-9０-９]+[-ー][0-9０-９]+|[0-9０-９]+丁目[0-9０-９]+番[0-9０-９]+号?).*$', r'\1', addr)
+    
     return addr.strip()
+
 
 # ==========================================
 # ドラムロール＋自由入力のハイブリッドコンポーネント
@@ -101,13 +166,24 @@ if facility_name:
     st.link_button(f"🔍 「{facility_name}」の住所をGoogleで検索", google_search_url)
 
 event_address_full = st.text_input("目的地住所（ビル・マンション名まで含む）", "")
+
+# 郵便番号等を除去したクリーンな住所を生成
 cleaned_address = clean_address(event_address_full)
+
 full_destination_target = f"{facility_name} {event_address_full}".strip()
 
+# 検索クエリ用の優先順位変数
 if event_address_full:
+    search_destination = event_address_full
+elif facility_name:
+    search_destination = facility_name
+else:
+    search_destination = ""
+
+if search_destination:
     st.write("---")
     st.write(f"▼ 🗺️ 目的地のマップ（視覚的確認）")
-    map_embed_url = f"https://www.google.com/maps?q={urllib.parse.quote(full_destination_target)}&output=embed"
+    map_embed_url = f"https://www.google.com/maps?q={urllib.parse.quote(search_destination)}&output=embed"
     components.iframe(map_embed_url, height=350, scrolling=True)
 
 st.write("---")
@@ -208,25 +284,23 @@ if travel_mode == "🚃 電車を利用する":
     
     with st.expander("🚃 STEP 2: 降車駅の検索と徒歩計算", expanded=True):
         
-        # --- 【UI改善】目的地住所（cleaned_address）の有無で表示を切り分ける ---
-        if cleaned_address:
+        if search_destination:
             st.write("▼ 🚉 周辺の駅を探す")
             st.caption("Googleの検索アルゴリズムを利用して、目的地の周辺駅を探します。")
-            nearby_search_query = f"周辺の駅 around:{cleaned_address}"
+            
+            around_target = cleaned_address if cleaned_address else facility_name
+            nearby_search_query = f"周辺の駅 around:{around_target}"
             nearby_station_url = f"https://www.google.com/maps/search/{urllib.parse.quote(nearby_search_query)}"
             st.link_button("🔍 地図を開いて周辺の駅を探す（別タブ）", nearby_station_url, use_container_width=True)
 
-        # 住所入力の有無に関わらず、近隣駅の入力欄は常に表示させます。
         st.write("▼ 🚉 目的地の近隣駅を入力")
         arrival_station = st.text_input("地図を確認して近隣駅（降車駅）を入力してください", "", key="arrival_station_input")
 
-        # ルート確認ボタンは、「駅」と「住所」の両方が入力されている時だけ表示します。
-        if arrival_station and cleaned_address:
-            route_search_url = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(arrival_station + '駅')}&destination={urllib.parse.quote(cleaned_address)}&travelmode=walking"
+        if arrival_station and search_destination:
+            route_search_url = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(arrival_station + '駅')}&destination={urllib.parse.quote(search_destination)}&travelmode=walking"
             st.link_button(f"🚶‍♂️ {arrival_station}駅から目的地までのルートを確認", route_search_url, use_container_width=True)
-        elif arrival_station and not cleaned_address:
-            # 住所がない場合はルート検索ができないため、案内文を表示します。
-            st.caption("※STEP 1で「目的地住所」を入力すると、ここから目的地までの徒歩ルート確認ボタンが表示されます。")
+        elif arrival_station and not search_destination:
+            st.caption("※STEP 1で「施設名（目的地）」または「目的地住所」を入力すると、ここから目的地までの徒歩ルート確認ボタンが表示されます。")
 
         st.write("---")
         st.write(f"🚉 確定した駅: **{arrival_station if arrival_station else '（未入力）'}**")
@@ -262,24 +336,9 @@ if travel_mode == "🚃 電車を利用する":
                 st.info("⌛ 位置情報を取得中、または許可待ちです...")
 
         st.write("---")
-        st.write("▼ 出発駅の候補リスト")
-
-        if "station_history" not in st.session_state:
-            st.session_state.station_history = []
-        if "station_df" not in st.session_state:
-            st.session_state.station_df = pd.DataFrame([
-                {"順番": 1, "出発駅名": "井細田"},
-                {"順番": 2, "出発駅名": "足柄(神奈川県)"},
-                {"順番": 3, "出発駅名": "小田原"}
-            ])
-
-        def save_to_history():
-            snapshot = st.session_state.station_df.copy()
-            timestamp = datetime.now(app_tz).strftime("%Y/%m/%d %H:%M:%S")
-            st.session_state.station_history.insert(0, {"time": timestamp, "data": snapshot})
-            if len(st.session_state.station_history) > 5:
-                st.session_state.station_history = st.session_state.station_history[:5]
-
+        st.write("▼ 出発駅の追加")
+        st.caption("💡 新しい駅を追加する場合は入力してボタンを押してください。（リストの確認・削除は左上の「＞」メニューから）")
+        
         col_add_input, col_add_btn = st.columns([3, 1])
         with col_add_input:
             new_station_name = st.text_input("駅名を入力", key="new_station_input", label_visibility="collapsed", placeholder="例：箱根板橋")
@@ -293,16 +352,6 @@ if travel_mode == "🚃 電車を利用する":
                     st.rerun()
 
         st.write("---")
-        for idx, row in st.session_state.station_df.iterrows():
-            col_num, col_name, col_del = st.columns([1, 4, 2], vertical_alignment="center")
-            with col_num: st.markdown(f"**{row['順番']}**")
-            with col_name: st.markdown(f"**{row['出発駅名']}**")
-            with col_del:
-                if st.button("🗑️ 削除", key=f"del_sta_{idx}", use_container_width=True):
-                    save_to_history()
-                    st.session_state.station_df = st.session_state.station_df.drop(idx).reset_index(drop=True)
-                    st.session_state.station_df["順番"] = range(1, len(st.session_state.station_df) + 1)
-                    st.rerun()
 
         valid_stations = [s for s in st.session_state.station_df["出発駅名"].tolist() if s and str(s).strip() != ""]
         depart_station = st.selectbox("今回利用する出発駅", valid_stations if valid_stations else ["駅名を入力してください"])
@@ -404,8 +453,8 @@ with st.expander("⚙️ ワンタッチボタンの編集（追加・削除）"
 st.write("---")
 
 if travel_mode == "🚃 電車を利用する":
-    walk_to_station = st.number_input("現在地から【利用する出発駅】までの徒歩時間（分）", key="walk_time", step=1)
-    prep_time = st.number_input("移動前の準備（仕度）時間（分）", value=15, step=1)
+    walk_to_station = st.number_input("現在地から【利用する出発駅】までの徒歩時間（分）", key="walk_time_train", step=1)
+    prep_time = st.number_input("移動前の準備（仕度）時間（分）", value=15, step=1, key="prep_time_train")
     
     train_depart_dt = datetime.combine(event_date, train_depart_time)
     leave_home_dt = train_depart_dt - timedelta(minutes=walk_to_station)
@@ -413,15 +462,47 @@ if travel_mode == "🚃 電車を利用する":
 
 else:
     st.write("▼ 🗺️ 目的地までの徒歩ルートと時間を確認")
-    if cleaned_address:
-        direct_walk_url = f"https://www.google.com/maps/dir/?api=1&destination={urllib.parse.quote(cleaned_address)}&travelmode=walking"
-        st.link_button("🚶‍♂️ 現在地から目的地までの徒歩ルートをGoogle Mapで確認", direct_walk_url, use_container_width=True)
-        st.caption("※Googleマップで表示された「徒歩〇〇分」の数字を、下の入力欄にセットしてください。")
+    
+    use_gps_walk = st.toggle("🌍 GPSを起動して現在地を取得する", key="use_gps_walk", value=False)
+    
+    if use_gps_walk:
+        js_code_walk = """
+        new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => { resolve({lat: pos.coords.latitude, lng: pos.coords.longitude}); },
+                (err) => { resolve({error: err.message}); },
+                {enableHighAccuracy: true, timeout: 10000, maximumAge: 0}
+            );
+        })
+        """
+        loc_walk = streamlit_js_eval(js_expressions=js_code_walk, key="gps_promise_fetch_walk")
+
+        if loc_walk:
+            if "error" in loc_walk:
+                st.error(f"❌ 位置情報の取得に失敗しました: {loc_walk['error']}")
+            else:
+                lat_walk, lng_walk = loc_walk['lat'], loc_walk['lng']
+                st.success("✅ 位置情報の取得に成功しました！")
+                
+                if search_destination:
+                    direct_walk_url = f"https://www.google.com/maps/dir/?api=1&origin={lat_walk},{lng_walk}&destination={urllib.parse.quote(search_destination)}&travelmode=walking"
+                    st.link_button("🚶‍♂️ 取得した現在地からの徒歩ルートを確認", direct_walk_url, use_container_width=True)
+                    st.caption("※Googleマップで表示された「徒歩〇〇分」の数字を、下の入力欄にセットしてください。")
+                else:
+                    st.warning("「施設名」または「目的地住所」が入力されていないため、ルート確認ボタンは表示されません。")
+        else:
+            st.info("⌛ 位置情報を取得中、または許可待ちです...")
+
     else:
-        st.warning("目的地の住所が入力されていないため、ルート確認ボタンは表示されません。")
+        if search_destination:
+            direct_walk_url = f"https://www.google.com/maps/dir/?api=1&destination={urllib.parse.quote(search_destination)}&travelmode=walking"
+            st.link_button("🚶‍♂️ 現在地から目的地までの徒歩ルートを確認", direct_walk_url, use_container_width=True)
+            st.caption("※Googleマップで表示された「徒歩〇〇分」の数字を、下の入力欄にセットしてください。")
+        else:
+            st.warning("「施設名」または「目的地住所」が入力されていないため、ルート確認ボタンは表示されません。")
         
-    walk_to_dest_direct = st.number_input("現在地から【目的地】までの総徒歩時間（分）", key="walk_time", step=1)
-    prep_time = st.number_input("移動前の準備（仕度）時間（分）", value=15, step=1)
+    walk_to_dest_direct = st.number_input("現在地から【目的地】までの総徒歩時間（分）", key="walk_time_direct", step=1)
+    prep_time = st.number_input("移動前の準備（仕度）時間（分）", value=15, step=1, key="prep_time_direct")
     
     leave_home_dt = target_arrival_dt - timedelta(minutes=walk_to_dest_direct)
     start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)

@@ -43,6 +43,7 @@ now_with_tz = datetime.now(app_tz)
 # ==========================================
 # データ管理系の初期化（サイドバー用）
 # ==========================================
+# --- 出発駅用 ---
 if "station_history" not in st.session_state:
     st.session_state.station_history = []
 if "station_df" not in st.session_state:
@@ -59,8 +60,63 @@ def save_to_history():
     if len(st.session_state.station_history) > 5:
         st.session_state.station_history = st.session_state.station_history[:5]
 
+# --- カレンダー管理用 ---
+if "calendar_history" not in st.session_state:
+    st.session_state.calendar_history = []
+if "calendar_df" not in st.session_state:
+    st.session_state.calendar_df = pd.DataFrame([
+        {"順番": 1, "カレンダー名": "メインカレンダー", "カレンダーID": "primary"}
+    ])
+
+def save_cal_to_history():
+    snapshot = st.session_state.calendar_df.copy()
+    timestamp = datetime.now(app_tz).strftime("%Y/%m/%d %H:%M:%S")
+    st.session_state.calendar_history.insert(0, {"time": timestamp, "data": snapshot})
+    if len(st.session_state.calendar_history) > 5:
+        st.session_state.calendar_history = st.session_state.calendar_history[:5]
+
+
 # ==========================================
-# サイドバーに出発駅リストの管理メニューを配置
+# --- 【バグ修正】安全な追加処理（コールバック関数） ---
+# ボタンが押された時、画面が再描画される「前」に実行される関数群です。
+# 描画前なので、入力欄の値を "" (空) にしてもエラーになりません。
+# ==========================================
+
+# 1. カレンダーの追加コールバック
+def add_new_calendar_callback():
+    name = st.session_state.new_cal_name_input.strip()
+    cal_id = st.session_state.new_cal_id_input.strip()
+    if name != "" and cal_id != "":
+        save_cal_to_history()
+        new_order = len(st.session_state.calendar_df) + 1
+        new_row = pd.DataFrame([{"順番": new_order, "カレンダー名": name, "カレンダーID": cal_id}])
+        st.session_state.calendar_df = pd.concat([st.session_state.calendar_df, new_row], ignore_index=True)
+        # 次の入力のために欄を空にする（エラーにならない）
+        st.session_state.new_cal_name_input = ""
+        st.session_state.new_cal_id_input = ""
+
+# 2. 出発駅の追加コールバック
+def add_new_station_callback():
+    name = st.session_state.new_station_input.strip()
+    if name != "":
+        save_to_history()
+        new_order = len(st.session_state.station_df) + 1
+        new_row = pd.DataFrame([{"順番": new_order, "出発駅名": name}])
+        st.session_state.station_df = pd.concat([st.session_state.station_df, new_row], ignore_index=True)
+        st.session_state.new_station_input = ""
+
+# 3. ワンタッチ徒歩の追加コールバック
+def add_new_preset_callback():
+    name = st.session_state.new_p_name_input.strip()
+    mins = st.session_state.new_p_time_input
+    if name != "":
+        st.session_state.walk_presets.append({"name": name, "time": mins})
+        st.session_state.new_p_name_input = ""
+        st.session_state.new_p_time_input = 10 # 10分にリセット
+
+
+# ==========================================
+# サイドバーメニュー（管理機能）
 # ==========================================
 st.sidebar.markdown("---")
 st.sidebar.header("🚉 出発駅リストの管理")
@@ -78,9 +134,9 @@ for idx, row in st.session_state.station_df.iterrows():
             st.rerun()
 
 if st.session_state.station_history:
-    with st.sidebar.expander("⏪ 変更履歴の管理（直近5件）"):
+    with st.sidebar.expander("⏪ 駅の変更履歴（直近5件）"):
         for i, h in enumerate(st.session_state.station_history):
-            st.markdown(f"**{i+1}: {h['time']} の状態**")
+            st.markdown(f"**{i+1}: {h['time']}**")
             col_res, col_del = st.columns(2)
             with col_res:
                 if st.button("⏪ 復元", key=f"hist_res_sb_{i}", use_container_width=True):
@@ -92,29 +148,59 @@ if st.session_state.station_history:
                     st.rerun()
             st.divider() 
 
+
+st.sidebar.markdown("---")
+st.sidebar.header("📅 登録先カレンダーの管理")
+st.sidebar.caption("Googleカレンダー設定画面の「カレンダーID」を登録します。（標準は primary）")
+
+for idx, row in st.session_state.calendar_df.iterrows():
+    col_name, col_del = st.sidebar.columns([4, 1], vertical_alignment="center")
+    with col_name: 
+        st.markdown(f"**{row['順番']}. {row['カレンダー名']}**<br><span style='font-size:11px; color:gray;'>{row['カレンダーID']}</span>", unsafe_allow_html=True)
+    with col_del:
+        if row['カレンダーID'] != 'primary':
+            if st.button("🗑️", key=f"del_cal_sb_{idx}", use_container_width=True):
+                save_cal_to_history()
+                st.session_state.calendar_df = st.session_state.calendar_df.drop(idx).reset_index(drop=True)
+                st.session_state.calendar_df["順番"] = range(1, len(st.session_state.calendar_df) + 1)
+                st.rerun()
+
+st.sidebar.caption("💡 新しいカレンダーを追加")
+# on_click引数で、上で作った関数を呼び出します
+st.sidebar.text_input("表示名", key="new_cal_name_input", placeholder="例：仕事用", label_visibility="collapsed")
+st.sidebar.text_input("カレンダーID", key="new_cal_id_input", placeholder="例：xxx@group.calendar.google.com", label_visibility="collapsed")
+st.sidebar.button("➕ 追加", key="add_cal_btn", use_container_width=True, on_click=add_new_calendar_callback)
+
+if st.session_state.calendar_history:
+    with st.sidebar.expander("⏪ カレンダー変更履歴"):
+        for i, h in enumerate(st.session_state.calendar_history):
+            st.markdown(f"**{i+1}: {h['time']}**")
+            col_res, col_del = st.columns(2)
+            with col_res:
+                if st.button("⏪ 復元", key=f"hist_res_cal_{i}", use_container_width=True):
+                    st.session_state.calendar_df = h["data"]
+                    st.rerun()
+            with col_del:
+                if st.button("🗑️ 削除", key=f"hist_del_cal_{i}", use_container_width=True):
+                    st.session_state.calendar_history.pop(i)
+                    st.rerun()
+            st.divider() 
+
+
+# ==========================================
+# メイン画面開始
+# ==========================================
 st.title("🗓 スケジュール＆移動ルーター")
 st.write(f"現在の設定時刻: **{now_with_tz.strftime('%Y/%m/%d %H:%M:%S')}** ({selected_tz_str})")
 st.write("確実な手順で、嘘のないスケジュールをカレンダーに登録します。")
 
-
-# ==========================================
-# --- 【機能改善】郵便番号に対応した住所クレンジング関数 ---
-# ==========================================
+# --- 住所クレンジング関数 ---
 def clean_address(addr):
     if not addr: return ""
-    
-    # 1. 郵便番号の除去（一番最初に行うことが重要）
-    # 〒マークの有無、全角・半角数字、ハイフンの種類を網羅し、前後のスペースごと空文字に置換して消し去る
     addr = re.sub(r'〒?\s*[0-9０-９]{3}[-ー][0-9０-９]{4}\s*', '', addr)
-    
-    # 2. スペースによる分割（建物名などを落とす）
     addr = re.split(r'[ 　]', addr)[0]
-    
-    # 3. 番地以降の不要な枝葉（部屋番号など）を落とす
     addr = re.sub(r'([0-9０-９]+[-ー][0-9０-９]+[-ー][0-9０-９]+|[0-9０-９]+[-ー][0-9０-９]+|[0-9０-９]+丁目[0-9０-９]+番[0-9０-９]+号?).*$', r'\1', addr)
-    
     return addr.strip()
-
 
 # ==========================================
 # ドラムロール＋自由入力のハイブリッドコンポーネント
@@ -153,6 +239,7 @@ def render_hybrid_time_picker(label, state_key, max_value, on_change_callback=No
     st.text_input("hidden", key=input_key, label_visibility="collapsed", on_change=manual_update)
     st.button("▼", key=f"down_{state_key}", on_click=decrement, use_container_width=True)
 
+
 # ==========================================
 # STEP 1: 予定開始時間と目的地の設定
 # ==========================================
@@ -166,13 +253,9 @@ if facility_name:
     st.link_button(f"🔍 「{facility_name}」の住所をGoogleで検索", google_search_url)
 
 event_address_full = st.text_input("目的地住所（ビル・マンション名まで含む）", "")
-
-# 郵便番号等を除去したクリーンな住所を生成
 cleaned_address = clean_address(event_address_full)
-
 full_destination_target = f"{facility_name} {event_address_full}".strip()
 
-# 検索クエリ用の優先順位変数
 if event_address_full:
     search_destination = event_address_full
 elif facility_name:
@@ -189,7 +272,6 @@ if search_destination:
 st.write("---")
 event_date = st.date_input("予定の日付", datetime.today())
 
-# --- 予定時間の初期化 ---
 if "start_h" not in st.session_state:
     st.session_state.start_h = now_with_tz.strftime("%H")
     st.session_state.input_start_h = st.session_state.start_h
@@ -277,6 +359,7 @@ depart_station = ""
 arrival_station = st.session_state.get('arrival_station_input', "")
 walk_to_dest = 0
 
+
 # ==========================================
 # STEP 2 & 3: 電車を利用する場合のみ表示
 # ==========================================
@@ -341,15 +424,9 @@ if travel_mode == "🚃 電車を利用する":
         
         col_add_input, col_add_btn = st.columns([3, 1])
         with col_add_input:
-            new_station_name = st.text_input("駅名を入力", key="new_station_input", label_visibility="collapsed", placeholder="例：箱根板橋")
+            st.text_input("駅名を入力", key="new_station_input", label_visibility="collapsed", placeholder="例：箱根板橋")
         with col_add_btn:
-            if st.button("➕ 追加", key="add_station_btn", use_container_width=True):
-                if new_station_name.strip() != "":
-                    save_to_history()
-                    new_order = len(st.session_state.station_df) + 1
-                    new_row = pd.DataFrame([{"順番": new_order, "出発駅名": new_station_name.strip()}])
-                    st.session_state.station_df = pd.concat([st.session_state.station_df, new_row], ignore_index=True)
-                    st.rerun()
+            st.button("➕ 追加", key="add_station_btn", use_container_width=True, on_click=add_new_station_callback)
 
         st.write("---")
 
@@ -442,13 +519,12 @@ with st.expander("⚙️ ワンタッチボタンの編集（追加・削除）"
     st.divider()
     if len(st.session_state.walk_presets) < 6:
         c_new_name, c_new_time, c_new_btn = st.columns([3, 2, 2], vertical_alignment="bottom")
-        with c_new_name: new_p_name = st.text_input("表示名", key="new_p_name_input", placeholder="例: コンビニ")
-        with c_new_time: new_p_time = st.number_input("分", min_value=1, value=10, step=1, key="new_p_time_input")
+        with c_new_name: 
+            st.text_input("表示名", key="new_p_name_input", placeholder="例: コンビニ")
+        with c_new_time: 
+            st.number_input("分", min_value=1, value=10, step=1, key="new_p_time_input")
         with c_new_btn:
-            if st.button("➕ 追加", key="add_preset_btn", use_container_width=True):
-                if new_p_name.strip() != "":
-                    st.session_state.walk_presets.append({"name": new_p_name.strip(), "time": new_p_time})
-                    st.rerun()
+            st.button("➕ 追加", key="add_preset_btn", use_container_width=True, on_click=add_new_preset_callback)
 
 st.write("---")
 
@@ -517,6 +593,18 @@ st.warning(f"🚶 **出発時刻: {leave_home_dt.strftime('%H:%M')}**")
 # ==========================================
 st.header("5. カレンダー登録")
 
+st.write("▼ 登録先カレンダーの選択")
+cal_options = [f"{row['カレンダー名']} ({row['カレンダーID']})" for idx, row in st.session_state.calendar_df.iterrows()]
+if cal_options:
+    selected_cal_str = st.selectbox("予定を登録するカレンダーを選択してください", cal_options)
+    selected_cal_idx = cal_options.index(selected_cal_str)
+    selected_calendar_id = st.session_state.calendar_df.iloc[selected_cal_idx]['カレンダーID']
+else:
+    st.warning("カレンダーが登録されていません。デフォルト(primary)を使用します。")
+    selected_calendar_id = "primary"
+
+st.write("---")
+
 if travel_mode == "🚃 電車を利用する":
     st.write("▼ 登録オプション")
     st.caption("カレンダーをすっきりさせたい場合、電車の乗車時間を登録から外すことができます。")
@@ -549,7 +637,7 @@ if st.button("📅 カレンダーに登録"):
                     'start': {'dateTime': start_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'},
                     'end': {'dateTime': end_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'},
                 }
-                service.events().insert(calendarId='primary', body=event_body).execute()
+                service.events().insert(calendarId=selected_calendar_id, body=event_body).execute()
 
             if travel_mode == "🚃 電車を利用する":
                 train_arrive_dt = datetime.combine(event_date, train_arrive_time)

@@ -56,6 +56,8 @@ def go_to_settings_stations():
 def go_to_settings_presets():
     st.session_state.current_page = "settings_presets"
 
+def go_to_settings_calendars():
+    st.session_state.current_page = "settings_calendars"
 
 if "walk_time_train" not in st.session_state:
     st.session_state.walk_time_train = 15
@@ -96,6 +98,16 @@ if "calendar_df" not in st.session_state:
         {"順番": 1, "カレンダー名": "メインカレンダー", "カレンダーID": "primary"}
     ])
 
+if "cal_sel_prep" not in st.session_state: st.session_state.cal_sel_prep = 0
+if "cal_sel_walk1" not in st.session_state: st.session_state.cal_sel_walk1 = 0
+if "cal_sel_train" not in st.session_state: st.session_state.cal_sel_train = 0
+if "cal_sel_walk2" not in st.session_state: st.session_state.cal_sel_walk2 = 0
+if "cal_sel_buffer" not in st.session_state: st.session_state.cal_sel_buffer = 0
+if "cal_sel_main" not in st.session_state: st.session_state.cal_sel_main = 0
+
+if "include_train_event" not in st.session_state: st.session_state.include_train_event = True
+if "include_buffer_event" not in st.session_state: st.session_state.include_buffer_event = True
+
 def save_cal_to_history():
     snapshot = st.session_state.calendar_df.copy()
     timestamp = datetime.now(app_tz).strftime("%Y/%m/%d %H:%M:%S")
@@ -107,20 +119,38 @@ def save_cal_to_history():
 # 安全な追加・同期用のコールバック関数
 # ==========================================
 
+# --- 【バグ修正】文字（String）をインデックス（整数）に変換して記憶する ---
+def update_cal_sel(state_key, widget_key):
+    selected_val = st.session_state[widget_key]
+    cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
+    if not cal_options_display:
+        cal_options_display = ["メインカレンダー"]
+    
+    # 選択された名前がリストの何番目か（インデックス）を取得して保存
+    try:
+        st.session_state[state_key] = cal_options_display.index(selected_val)
+    except ValueError:
+        st.session_state[state_key] = 0
+
+# --- 【バグ修正】カレンダー削除時のインデックスエラー(Out of range)を防ぐ安全装置 ---
+def get_safe_cal_idx(state_key, options_list):
+    idx = st.session_state.get(state_key, 0)
+    return idx if 0 <= idx < len(options_list) else 0
+
 def set_walk_time_callback(mins):
     st.session_state.walk_time_train = mins
     st.session_state.walk_time_direct = mins
 
-def add_new_calendar_callback():
-    name = st.session_state.new_cal_name_input.strip()
-    cal_id = st.session_state.new_cal_id_input.strip()
+def add_new_calendar_sb_callback():
+    name = st.session_state.new_cal_name_input_sb.strip()
+    cal_id = st.session_state.new_cal_id_input_sb.strip()
     if name != "" and cal_id != "":
         save_cal_to_history()
         new_order = len(st.session_state.calendar_df) + 1
         new_row = pd.DataFrame([{"順番": new_order, "カレンダー名": name, "カレンダーID": cal_id}])
         st.session_state.calendar_df = pd.concat([st.session_state.calendar_df, new_row], ignore_index=True)
-        st.session_state.new_cal_name_input = ""
-        st.session_state.new_cal_id_input = ""
+        st.session_state.new_cal_name_input_sb = ""
+        st.session_state.new_cal_id_input_sb = ""
 
 def add_new_station_callback():
     name = st.session_state.new_station_input.strip()
@@ -229,51 +259,81 @@ if st.session_state.current_page == "settings":
             else:
                 st.error("❌ credentials.json ファイルが見つかりません。")
 
-    with st.expander("📅 登録先カレンダーの管理", expanded=False):
-        st.caption("Googleカレンダーの「カレンダーID」を登録します。")
-        for idx, row in st.session_state.calendar_df.iterrows():
-            col_name, col_del = st.columns([4, 1], vertical_alignment="center")
-            with col_name: 
-                st.markdown(f"**{row['順番']}. {row['カレンダー名']}**<br><span style='font-size:11px; color:gray;'>{row['カレンダーID']}</span>", unsafe_allow_html=True)
-            with col_del:
-                if row['カレンダーID'] != 'primary':
-                    if st.button("🗑️", key=f"del_cal_sb_{idx}", use_container_width=True):
-                        save_cal_to_history()
-                        st.session_state.calendar_df = st.session_state.calendar_df.drop(idx).reset_index(drop=True)
-                        st.session_state.calendar_df["順番"] = range(1, len(st.session_state.calendar_df) + 1)
-                        st.rerun()
-        st.divider()
-        st.caption("💡 新しいカレンダーを追加")
-        st.text_input("表示名", key="new_cal_name_input", placeholder="例：仕事用", label_visibility="collapsed")
-        st.text_input("カレンダーID", key="new_cal_id_input", placeholder="例：xxx@group.calendar.google.com", label_visibility="collapsed")
-        st.button("➕ 追加", key="add_cal_btn", use_container_width=True, on_click=add_new_calendar_callback)
-
-        if st.session_state.calendar_history:
-            st.divider()
-            st.caption("⏪ カレンダー変更履歴")
-            for i, h in enumerate(st.session_state.calendar_history):
-                st.markdown(f"**{i+1}: {h['time']}**")
-                col_res, col_del = st.columns(2)
-                with col_res:
-                    if st.button("⏪ 復元", key=f"hist_res_cal_{i}", use_container_width=True):
-                        st.session_state.calendar_df = h["data"]
-                        st.rerun()
-                with col_del:
-                    if st.button("🗑️ 削除", key=f"hist_del_cal_{i}", use_container_width=True):
-                        st.session_state.calendar_history.pop(i)
-                        st.rerun()
-                st.write("")
-
     st.write("---")
+    
     st.caption("詳細設定")
     st.markdown('<div class="menu-button">', unsafe_allow_html=True)
+    st.button("📅 登録先カレンダーの管理  ＞", on_click=go_to_settings_calendars, use_container_width=True)
     st.button("🚉 出発駅リストの管理  ＞", on_click=go_to_settings_stations, use_container_width=True)
     st.button("🏠 徒歩時間ワンタッチボタンの管理  ＞", on_click=go_to_settings_presets, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ------------------------------------------
-# A-2. 個別設定画面（出発駅リストの管理）
+# A-2. 個別設定画面（登録先カレンダーの管理）
+# ------------------------------------------
+elif st.session_state.current_page == "settings_calendars":
+    
+    st.button("◀️ 管理メニューに戻る", on_click=go_to_settings, type="secondary", use_container_width=True)
+    
+    st.title("📅 登録先カレンダーの管理")
+    st.caption("Googleカレンダーの「カレンダーID」を追加・削除します。")
+    st.write("---")
+
+    for idx, row in st.session_state.calendar_df.iterrows():
+        col_name, col_del = st.columns([4, 1], vertical_alignment="center")
+        with col_name: 
+            st.markdown(f"**{row['順番']}. {row['カレンダー名']}**<br><span style='font-size:11px; color:gray;'>{row['カレンダーID']}</span>", unsafe_allow_html=True)
+        with col_del:
+            if row['カレンダーID'] != 'primary':
+                if st.button("🗑️", key=f"del_cal_sub_{idx}", use_container_width=True):
+                    save_cal_to_history()
+                    st.session_state.calendar_df = st.session_state.calendar_df.drop(idx).reset_index(drop=True)
+                    st.session_state.calendar_df["順番"] = range(1, len(st.session_state.calendar_df) + 1)
+                    st.rerun()
+                    
+    st.divider()
+    st.subheader("💡 新しいカレンダーを追加")
+    st.text_input("表示名", key="new_cal_name_input_sb", placeholder="例：仕事用")
+    st.text_input("カレンダーID", key="new_cal_id_input_sb", placeholder="例：xxx@group.calendar.google.com")
+    st.button("➕ 追加する", key="add_cal_btn_sub", type="primary", use_container_width=True, on_click=add_new_calendar_sb_callback)
+
+    if st.session_state.calendar_history:
+        st.divider()
+        st.subheader("⏪ カレンダー変更履歴")
+        for i, h in enumerate(st.session_state.calendar_history):
+            st.markdown(f"**{i+1}: {h['time']}**")
+            col_res, col_del = st.columns(2)
+            with col_res:
+                if st.button("⏪ 復元", key=f"hist_res_cal_sub_{i}", use_container_width=True):
+                    st.session_state.calendar_df = h["data"]
+                    st.rerun()
+            with col_del:
+                if st.button("🗑️ 削除", key=f"hist_del_cal_sub_{i}", use_container_width=True):
+                    st.session_state.calendar_history.pop(i)
+                    st.rerun()
+            st.write("")
+
+    st.divider()
+    st.subheader("⚙️ 工程ごとの登録先カレンダー設定")
+    st.caption("各予定をどのカレンダーに振り分けるかのデフォルトを設定します。")
+    
+    cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
+    if not cal_options_display:
+        cal_options_display = ["メインカレンダー"]
+
+    # --- 【バグ修正】安全なインデックス取得(get_safe_cal_idx)をすべてのプルダウンに適用 ---
+    with st.container(border=True):
+        st.selectbox("① 🏠 準備", cal_options_display, index=get_safe_cal_idx("cal_sel_prep", cal_options_display), key="cal_sel_prep_widget_set", on_change=update_cal_sel, args=("cal_sel_prep", "cal_sel_prep_widget_set"))
+        st.selectbox("② 🚶 自宅～出発駅（出発地〜目的地）", cal_options_display, index=get_safe_cal_idx("cal_sel_walk1", cal_options_display), key="cal_sel_walk1_widget_set", on_change=update_cal_sel, args=("cal_sel_walk1", "cal_sel_walk1_widget_set"))
+        st.selectbox("③ 🚃 電車（出発駅～到着駅）", cal_options_display, index=get_safe_cal_idx("cal_sel_train", cal_options_display), key="cal_sel_train_widget_set", on_change=update_cal_sel, args=("cal_sel_train", "cal_sel_train_widget_set"))
+        st.selectbox("④ 🚶 到着駅～目的地", cal_options_display, index=get_safe_cal_idx("cal_sel_walk2", cal_options_display), key="cal_sel_walk2_widget_set", on_change=update_cal_sel, args=("cal_sel_walk2", "cal_sel_walk2_widget_set"))
+        st.selectbox("⑤ ⏳ 待機（バッファ）", cal_options_display, index=get_safe_cal_idx("cal_sel_buffer", cal_options_display), key="cal_sel_buffer_widget_set", on_change=update_cal_sel, args=("cal_sel_buffer", "cal_sel_buffer_widget_set"))
+        st.selectbox("⑥ 🎯 本番の予定", cal_options_display, index=get_safe_cal_idx("cal_sel_main", cal_options_display), key="cal_sel_main_widget_set", on_change=update_cal_sel, args=("cal_sel_main", "cal_sel_main_widget_set"))
+
+
+# ------------------------------------------
+# A-3. 個別設定画面（出発駅リストの管理）
 # ------------------------------------------
 elif st.session_state.current_page == "settings_stations":
     
@@ -317,7 +377,7 @@ elif st.session_state.current_page == "settings_stations":
 
 
 # ------------------------------------------
-# A-3. 個別設定画面（徒歩時間ワンタッチボタンの管理）
+# A-4. 個別設定画面（徒歩時間ワンタッチボタンの管理）
 # ------------------------------------------
 elif st.session_state.current_page == "settings_presets":
     
@@ -515,14 +575,14 @@ elif st.session_state.current_page == "main":
             display_sta = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else "〇〇"
             st.success(f"🚃 **{display_sta}駅** に **{train_deadline_dt.strftime('%H:%M')}** までに到着する電車を探します。")
 
-        # --- 【UI改善】STEP3の分割と再構築（データ抽出） ---
         valid_stations = [s for s in st.session_state.station_df["出発駅名"].tolist() if s and str(s).strip() != ""]
+        valid_stations = valid_stations[::-1]
+        
         if not valid_stations: valid_stations = ["駅名を入力してください"]
         
         if "selected_depart_station" not in st.session_state or st.session_state.selected_depart_station not in valid_stations:
             st.session_state.selected_depart_station = valid_stations[0]
 
-        # --- ① 出発駅を探す専用のエキスパンダー ---
         with st.expander("🔍 出発駅を探す・追加・全リスト", expanded=False):
             st.write("▼ 📍 現在地から出発駅を探す")
             if st.toggle("🌍 GPSを起動して現在地を取得する", value=False):
@@ -554,7 +614,6 @@ elif st.session_state.current_page == "main":
                 label_visibility="collapsed"
             )
 
-        # --- ② ワンタッチ選択と ③ ジョルダン検索を STEP3の先頭に ---
         with st.expander("🚃 STEP 3: ルート検索と電車の時刻入力", expanded=True):
             st.write("▼ 今回利用する出発駅を選択（ワンタッチ）")
             
@@ -572,7 +631,6 @@ elif st.session_state.current_page == "main":
                         args=(sta,)
                     )
 
-            # 選ばれた駅を変数に確保してジョルダンに渡す
             depart_station = st.session_state.selected_depart_station
             clean_arrival_sta_for_jorudan = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else ""
             jorudan_params = {"eki1": depart_station, "eki2": clean_arrival_sta_for_jorudan, "Dym": event_date.strftime("%Y%m"), "Ddd": event_date.strftime("%d"), "Dhh": train_deadline_dt.strftime("%H"), "Dmn1": str(train_deadline_dt.minute // 10), "Dmn2": str(train_deadline_dt.minute % 10), "Cway": "1"}
@@ -675,22 +733,6 @@ elif st.session_state.current_page == "main":
     # ==========================================
     st.header("5. カレンダー登録")
 
-    st.write("▼ 登録先カレンダーの選択")
-    cal_options = [f"{row['カレンダー名']} ({row['カレンダーID']})" for idx, row in st.session_state.calendar_df.iterrows()]
-    if cal_options:
-        selected_cal_str = st.selectbox("予定を登録するカレンダーを選択してください", cal_options)
-        selected_calendar_id = st.session_state.calendar_df.iloc[cal_options.index(selected_cal_str)]['カレンダーID']
-    else:
-        st.warning("カレンダーが登録されていません。デフォルト(primary)を使用します。")
-        selected_calendar_id = "primary"
-
-    st.write("---")
-
-    if travel_mode == "🚃 電車を利用する":
-        st.write("▼ 登録オプション")
-        st.caption("カレンダーをすっきりさせたい場合、電車の乗車時間を登録から外すことができます。")
-        include_train_event = st.toggle("🚃 電車の乗車時間もカレンダーに登録する", value=True)
-
     if st.button("📅 カレンダーに登録", type="primary", use_container_width=True):
         try:
             with st.spinner("Googleカレンダーに通信中..."):
@@ -710,32 +752,80 @@ elif st.session_state.current_page == "main":
 
                 service = build('calendar', 'v3', credentials=creds)
 
-                def insert_event(summary, start_datetime, end_datetime, location=""):
-                    service.events().insert(calendarId=selected_calendar_id, body={'summary': summary, 'location': location, 'start': {'dateTime': start_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}, 'end': {'dateTime': end_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}}).execute()
+                cal_options_ids = [f"{row['カレンダーID']}" for idx, row in st.session_state.calendar_df.iterrows()]
+                if not cal_options_ids:
+                    cal_options_ids = ["primary"]
+
+                inc_train = st.session_state.include_train_event
+                inc_buffer = st.session_state.include_buffer_event
+                id_prep = cal_options_ids[st.session_state.cal_sel_prep] if st.session_state.cal_sel_prep < len(cal_options_ids) else cal_options_ids[0]
+                id_walk1 = cal_options_ids[st.session_state.cal_sel_walk1] if st.session_state.cal_sel_walk1 < len(cal_options_ids) else cal_options_ids[0]
+                id_train = cal_options_ids[st.session_state.cal_sel_train] if st.session_state.cal_sel_train < len(cal_options_ids) else cal_options_ids[0]
+                id_walk2 = cal_options_ids[st.session_state.cal_sel_walk2] if st.session_state.cal_sel_walk2 < len(cal_options_ids) else cal_options_ids[0]
+                id_buffer = cal_options_ids[st.session_state.cal_sel_buffer] if st.session_state.cal_sel_buffer < len(cal_options_ids) else cal_options_ids[0]
+                id_main = cal_options_ids[st.session_state.cal_sel_main] if st.session_state.cal_sel_main < len(cal_options_ids) else cal_options_ids[0]
+
+                def insert_event(summary, start_datetime, end_datetime, cal_id, location=""):
+                    service.events().insert(calendarId=cal_id, body={'summary': summary, 'location': location, 'start': {'dateTime': start_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}, 'end': {'dateTime': end_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}}).execute()
 
                 if travel_mode == "🚃 電車を利用する":
                     train_arrive_dt = datetime.combine(event_date, train_arrive_time)
                     if train_arrive_dt < datetime.combine(event_date, train_depart_time): train_arrive_dt += timedelta(days=1)
+                    
                     actual_arrive_dt = train_arrive_dt + timedelta(minutes=walk_to_dest)
-
                     clean_arrival_sta_for_cal = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else ""
 
-                    insert_event(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt)
-                    insert_event(f"🚶 徒歩（自宅〜{depart_station}駅）：{event_title}", leave_home_dt, datetime.combine(event_date, train_depart_time))
-                    if include_train_event:
-                        insert_event(f"🚃 電車（{depart_station}駅〜{clean_arrival_sta_for_cal}駅）：{event_title}", datetime.combine(event_date, train_depart_time), train_arrive_dt)
-                    insert_event(f"🚶 徒歩（{clean_arrival_sta_for_cal}駅〜目的地）：{event_title}", train_arrive_dt, actual_arrive_dt)
-                    insert_event(event_title, event_dt, datetime.combine(event_date, end_time), location=full_destination_target)
+                    insert_event(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt, id_prep)
+                    insert_event(f"🚶 徒歩（自宅〜{depart_station}駅）：{event_title}", leave_home_dt, datetime.combine(event_date, train_depart_time), id_walk1)
+                    if inc_train:
+                        insert_event(f"🚃 電車（{depart_station}駅〜{clean_arrival_sta_for_cal}駅）：{event_title}", datetime.combine(event_date, train_depart_time), train_arrive_dt, id_train)
+                    insert_event(f"🚶 徒歩（{clean_arrival_sta_for_cal}駅〜目的地）：{event_title}", train_arrive_dt, actual_arrive_dt, id_walk2)
                     
-                    st.success("✅ 準備から移動の詳細、本番までをカレンダーに登録しました！" if include_train_event else "✅ 電車の乗車時間を除く予定をカレンダーに登録しました！")
+                    if inc_buffer and (event_dt - actual_arrive_dt).total_seconds() > 60:
+                        insert_event(f"⏳ 待機（バッファ）：{event_title}", actual_arrive_dt, event_dt, id_buffer, location=full_destination_target)
+                        
+                    insert_event(event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
+                    
+                    st.success("✅ 準備から移動の詳細、本番までを各カレンダーに登録しました！")
 
                 else:
-                    insert_event(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt)
-                    insert_event(f"🚶 徒歩（出発地〜目的地）：{event_title}", leave_home_dt, target_arrival_dt)
-                    insert_event(event_title, event_dt, datetime.combine(event_date, end_time), location=full_destination_target)
+                    insert_event(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt, id_prep)
+                    insert_event(f"🚶 徒歩（出発地〜目的地）：{event_title}", leave_home_dt, target_arrival_dt, id_walk1)
                     
-                    st.success("✅ 準備、徒歩移動、本番の3つの予定をカレンダーに登録しました！")
+                    if inc_buffer and (event_dt - target_arrival_dt).total_seconds() > 60:
+                        insert_event(f"⏳ 待機（バッファ）：{event_title}", target_arrival_dt, event_dt, id_buffer, location=full_destination_target)
+
+                    insert_event(event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
+                    
+                    st.success("✅ 準備、徒歩移動、本番の予定を各カレンダーに登録しました！")
 
             st.balloons()
         except Exception as e:
             st.error(f"❌ 登録失敗: {e}")
+
+    st.write("---")
+    st.write("▼ 登録オプション")
+    if travel_mode == "🚃 電車を利用する":
+        st.caption("電車の乗車時間をカレンダーに登録したくない場合はOFFにしてください。")
+        st.toggle("🚃 電車の乗車時間も登録する", key="include_train_event")
+        
+    st.caption("目標到着時刻と予定開始時刻の間に隙間がある場合、待機時間として登録します。")
+    st.toggle("⏳ 待機（バッファ）時間を登録する", key="include_buffer_event")
+
+    # --- 【バグ修正】安全なインデックス取得をメイン画面側にも適用 ---
+    st.write("---")
+    with st.expander("▼ 工程ごとの登録先カレンダー設定", expanded=False):
+        st.caption("各予定をどのカレンダーに振り分けるかを選択できます。（設定画面のデフォルト値が初期セットされています）")
+        
+        cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
+        if not cal_options_display:
+            cal_options_display = ["メインカレンダー"]
+
+        with st.container(border=True):
+            st.selectbox("① 🏠 準備", cal_options_display, index=get_safe_cal_idx("cal_sel_prep", cal_options_display), key="cal_sel_prep_widget_main", on_change=update_cal_sel, args=("cal_sel_prep", "cal_sel_prep_widget_main"))
+            st.selectbox("② 🚶 自宅～出発駅（出発地〜目的地）", cal_options_display, index=get_safe_cal_idx("cal_sel_walk1", cal_options_display), key="cal_sel_walk1_widget_main", on_change=update_cal_sel, args=("cal_sel_walk1", "cal_sel_walk1_widget_main"))
+            if travel_mode == "🚃 電車を利用する":
+                st.selectbox("③ 🚃 電車（出発駅～到着駅）", cal_options_display, index=get_safe_cal_idx("cal_sel_train", cal_options_display), key="cal_sel_train_widget_main", on_change=update_cal_sel, args=("cal_sel_train", "cal_sel_train_widget_main"))
+                st.selectbox("④ 🚶 到着駅～目的地", cal_options_display, index=get_safe_cal_idx("cal_sel_walk2", cal_options_display), key="cal_sel_walk2_widget_main", on_change=update_cal_sel, args=("cal_sel_walk2", "cal_sel_walk2_widget_main"))
+            st.selectbox("⑤ ⏳ 待機（バッファ）", cal_options_display, index=get_safe_cal_idx("cal_sel_buffer", cal_options_display), key="cal_sel_buffer_widget_main", on_change=update_cal_sel, args=("cal_sel_buffer", "cal_sel_buffer_widget_main"))
+            st.selectbox("⑥ 🎯 本番の予定", cal_options_display, index=get_safe_cal_idx("cal_sel_main", cal_options_display), key="cal_sel_main_widget_main", on_change=update_cal_sel, args=("cal_sel_main", "cal_sel_main_widget_main"))

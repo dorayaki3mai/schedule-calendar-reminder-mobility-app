@@ -17,7 +17,6 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 import requests # メールアドレス取得用
-
 # --- GPS取得用のライブラリ ---
 from streamlit_js_eval import streamlit_js_eval
 
@@ -94,9 +93,37 @@ if "include_buffer_event" not in st.session_state: st.session_state.include_buff
 
 if "google_creds" not in st.session_state: st.session_state.google_creds = None
 if "force_logout" not in st.session_state: st.session_state.force_logout = False
-
-# --- 【機能追加】連携中のメールアドレスを記憶 ---
 if "linked_email" not in st.session_state: st.session_state.linked_email = ""
+
+
+# --- 【バグ修正】既存の連携アカウントのメールアドレスを起動時に取得する ---
+if "email_fetched" not in st.session_state:
+    st.session_state.email_fetched = False
+
+if not st.session_state.email_fetched and not st.session_state.force_logout:
+    try:
+        SCOPES = ['https://www.googleapis.com/auth/calendar', 'https://www.googleapis.com/auth/userinfo.email', 'openid']
+        creds = None
+        if st.session_state.google_creds is not None:
+            creds = Credentials.from_authorized_user_info(json.loads(st.session_state.google_creds), SCOPES)
+        elif "GOOGLE_TOKEN_JSON" in st.secrets:
+            creds = Credentials.from_authorized_user_info(json.loads(st.secrets["GOOGLE_TOKEN_JSON"]), SCOPES)
+        elif os.path.exists('token.json'):
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+            
+        if creds:
+            # 期限切れならリフレッシュして最新のトークンにする
+            if creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            # 有効な鍵であればGoogleにアドレスを問い合わせる
+            if creds.valid:
+                user_info_response = requests.get('https://www.googleapis.com/oauth2/v1/userinfo', headers={'Authorization': f'Bearer {creds.token}'})
+                st.session_state.linked_email = user_info_response.json().get('email', '')
+        
+        st.session_state.email_fetched = True
+    except Exception as e:
+        # エラーが起きてもフラグを立て、画面がリロードされるたびに重くなるのを防ぐ
+        st.session_state.email_fetched = True
 
 
 def save_cal_to_history():
@@ -121,7 +148,6 @@ def set_walk_time_callback(mins):
     st.session_state.walk_time_train = mins
     st.session_state.walk_time_direct = mins
 
-# メイン画面からのカレンダー追加用
 def add_new_calendar_callback():
     name = st.session_state.new_cal_name_input.strip()
     cal_id = st.session_state.new_cal_id_input.strip()
@@ -133,7 +159,6 @@ def add_new_calendar_callback():
         st.session_state.new_cal_name_input = ""
         st.session_state.new_cal_id_input = ""
 
-# 設定画面からのカレンダー追加用
 def add_new_calendar_sb_callback():
     name = st.session_state.new_cal_name_input_sb.strip()
     cal_id = st.session_state.new_cal_id_input_sb.strip()
@@ -203,8 +228,6 @@ if st.session_state.current_page == "settings":
 
     with st.expander("👤 カレンダーアカウント連携", expanded=False):
         st.caption("連携しているGoogleアカウントの接続解除・切り替えを行います。")
-        
-        # --- 【バグ修正・機能追加】メールアドレスも取得するためのSCOPEを追加 ---
         SCOPES = [
             'https://www.googleapis.com/auth/calendar',
             'https://www.googleapis.com/auth/userinfo.email',
@@ -233,6 +256,7 @@ if st.session_state.current_page == "settings":
                     if os.path.exists('token.json'): os.remove('token.json')
                     st.session_state.google_creds = None
                     st.session_state.linked_email = ""
+                    st.session_state.email_fetched = False # 解除時にフラグもリセット
                     if "oauth_flow" in st.session_state: del st.session_state["oauth_flow"]
                     st.session_state.force_logout = True
                     st.rerun()
@@ -258,10 +282,10 @@ if st.session_state.current_page == "settings":
                         st.session_state.google_creds = creds.to_json()
                         with open('token.json', 'w') as token: token.write(creds.to_json())
                         
-                        # --- 【機能追加】認証成功時にメールアドレスを取得して記憶 ---
                         try:
                             user_info_response = requests.get('https://www.googleapis.com/oauth2/v1/userinfo', headers={'Authorization': f'Bearer {creds.token}'})
                             st.session_state.linked_email = user_info_response.json().get('email', '')
+                            st.session_state.email_fetched = True
                         except:
                             st.session_state.linked_email = "取得失敗"
 
@@ -475,9 +499,8 @@ elif st.session_state.current_page == "main":
     else:
         cal_target_url = f"https://calendar.google.com/calendar/r?cid={urllib.parse.quote(main_cal_id)}"
 
-    # --- 【UI改修】ボタンのラベルに連携中のメールアドレスを表示して注意喚起 ---
-    btn_label = f"📅 カレンダーを確認 ({st.session_state.linked_email})" if st.session_state.linked_email else "📅 カレンダーを確認"
-    st.link_button(btn_label, cal_target_url, use_container_width=True)
+    btn_label_step5 = f"📅 カレンダーを確認 ({st.session_state.linked_email})" if st.session_state.linked_email else "📅 カレンダーを確認"
+    st.link_button(btn_label_step5, cal_target_url, use_container_width=True)
     if st.session_state.linked_email:
         st.caption("※違うアカウントが開く場合は、ブラウザ右上のアイコンから連携中のアカウントに切り替えてください。")
 
@@ -839,12 +862,9 @@ elif st.session_state.current_page == "main":
             else:
                 st.error(f"❌ 登録失敗: {e}")
 
-    # --- 【機能追加】STEP 5 側のカレンダー確認ボタン ---
-    btn_label_step5 = f"📅 カレンダーを確認 ({st.session_state.linked_email})" if st.session_state.linked_email else "📅 カレンダーを確認"
     st.link_button(btn_label_step5, cal_target_url, use_container_width=True)
     if st.session_state.linked_email:
         st.caption("※違うアカウントが開く場合は、ブラウザ右上のアイコンから連携中のアカウントに切り替えてください。")
-
 
     st.write("---")
     st.write("▼ 登録オプション")

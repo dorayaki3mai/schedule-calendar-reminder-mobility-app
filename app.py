@@ -90,8 +90,10 @@ if "cal_sel_main" not in st.session_state: st.session_state.cal_sel_main = 0
 if "include_train_event" not in st.session_state: st.session_state.include_train_event = True
 if "include_buffer_event" not in st.session_state: st.session_state.include_buffer_event = True
 
-# --- 【認証機能改修】セッション（ブラウザ）ごとに鍵を記憶するための変数 ---
 if "google_creds" not in st.session_state: st.session_state.google_creds = None
+
+# --- 【バグ修正】シークレットの強制オーバーライドフラグ（強制ログアウト状態の記憶） ---
+if "force_logout" not in st.session_state: st.session_state.force_logout = False
 
 
 def save_cal_to_history():
@@ -187,28 +189,30 @@ if st.session_state.current_page == "settings":
         st.caption("連携しているGoogleアカウントの接続解除・切り替えを行います。")
         SCOPES = ['https://www.googleapis.com/auth/calendar']
         
-        # --- 【認証機能改修】状態の判定順序の変更（セッション優先） ---
         is_authenticated = False
         auth_method = ""
 
-        if st.session_state.google_creds is not None:
-            is_authenticated = True
-            auth_method = "📱 このブラウザで連携されています"
-        elif os.path.exists('token.json'):
-            is_authenticated = True
-            auth_method = "💻 ローカルファイルで連携されています"
-        elif "GOOGLE_TOKEN_JSON" in st.secrets:
-            is_authenticated = True
-            auth_method = "☁️ クラウドの固定シークレットで連携されています"
+        # --- 【バグ修正】強制ログアウトフラグがFalseの時だけ認証をチェックする ---
+        if not st.session_state.force_logout:
+            if st.session_state.google_creds is not None:
+                is_authenticated = True
+                auth_method = "📱 このブラウザで連携されています"
+            elif os.path.exists('token.json'):
+                is_authenticated = True
+                auth_method = "💻 ローカルファイルで連携されています"
+            elif "GOOGLE_TOKEN_JSON" in st.secrets:
+                is_authenticated = True
+                auth_method = "☁️ クラウドの固定シークレットで連携されています"
 
         if is_authenticated:
             st.success(f"✅ 現在のアカウントは連携済みです\n\n({auth_method})")
             if st.button("🗑️ アカウント連携を解除する", use_container_width=True):
                 try:
                     if os.path.exists('token.json'): os.remove('token.json')
-                    st.session_state.google_creds = None # セッションも消去
+                    st.session_state.google_creds = None
                     if "oauth_flow" in st.session_state: del st.session_state["oauth_flow"]
-                    st.success("連携を解除しました。")
+                    # --- 【要】ここで強制ログアウトのフラグを立ててシークレットを無効化 ---
+                    st.session_state.force_logout = True
                     st.rerun()
                 except Exception as e:
                     st.error(f"解除処理に失敗しました: {e}")
@@ -229,10 +233,10 @@ if st.session_state.current_page == "settings":
                         flow = st.session_state.oauth_flow
                         flow.fetch_token(code=auth_code)
                         creds = flow.credentials
-                        # --- 【認証機能改修】取得した鍵をブラウザ(Session)に記憶させる ---
                         st.session_state.google_creds = creds.to_json()
-                        # バックアップとしてファイルにも書き出す
                         with open('token.json', 'w') as token: token.write(creds.to_json())
+                        # --- 【要】ログイン成功したら強制ログアウトフラグを下ろす ---
+                        st.session_state.force_logout = False
                         st.success("✅ 認証成功！メイン画面からカレンダーに登録できます。")
                         st.rerun()
                     except Exception as e:
@@ -651,13 +655,14 @@ elif st.session_state.current_page == "main":
                 SCOPES = ['https://www.googleapis.com/auth/calendar']
                 creds = None
                 
-                # --- 【認証機能改修】登録時も「セッション(記憶)」の鍵を最優先で使う ---
-                if st.session_state.google_creds is not None:
-                    creds = Credentials.from_authorized_user_info(json.loads(st.session_state.google_creds), SCOPES)
-                elif os.path.exists('token.json'):
-                    creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-                elif "GOOGLE_TOKEN_JSON" in st.secrets:
-                    creds = Credentials.from_authorized_user_info(json.loads(st.secrets["GOOGLE_TOKEN_JSON"]), SCOPES)
+                # --- 【バグ修正】強制ログアウトフラグがFalseの時だけ認証情報をロードする ---
+                if not st.session_state.force_logout:
+                    if st.session_state.google_creds is not None:
+                        creds = Credentials.from_authorized_user_info(json.loads(st.session_state.google_creds), SCOPES)
+                    elif os.path.exists('token.json'):
+                        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+                    elif "GOOGLE_TOKEN_JSON" in st.secrets:
+                        creds = Credentials.from_authorized_user_info(json.loads(st.secrets["GOOGLE_TOKEN_JSON"]), SCOPES)
                 
                 if not creds or not creds.valid:
                     if creds and creds.expired and creds.refresh_token: 

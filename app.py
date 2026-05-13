@@ -115,6 +115,19 @@ def set_walk_time_callback(mins):
     st.session_state.walk_time_train = mins
     st.session_state.walk_time_direct = mins
 
+# メイン画面からのカレンダー追加用
+def add_new_calendar_callback():
+    name = st.session_state.new_cal_name_input.strip()
+    cal_id = st.session_state.new_cal_id_input.strip()
+    if name != "" and cal_id != "":
+        save_cal_to_history()
+        new_order = len(st.session_state.calendar_df) + 1
+        new_row = pd.DataFrame([{"順番": new_order, "カレンダー名": name, "カレンダーID": cal_id}])
+        st.session_state.calendar_df = pd.concat([st.session_state.calendar_df, new_row], ignore_index=True)
+        st.session_state.new_cal_name_input = ""
+        st.session_state.new_cal_id_input = ""
+
+# 設定画面からのカレンダー追加用
 def add_new_calendar_sb_callback():
     name = st.session_state.new_cal_name_input_sb.strip()
     cal_id = st.session_state.new_cal_id_input_sb.strip()
@@ -189,7 +202,6 @@ if st.session_state.current_page == "settings":
         is_authenticated = False
         auth_method = ""
 
-        # --- 【バグ修正・安全性強化】Secrets(本番用)をローカルファイルより優先して判定する ---
         if not st.session_state.force_logout:
             if st.session_state.google_creds is not None:
                 is_authenticated = True
@@ -286,6 +298,71 @@ elif st.session_state.current_page == "settings_calendars":
                     st.session_state.calendar_history.pop(i)
                     st.rerun()
             st.write("")
+
+    # --- 【機能追加】CSVエクスポート機能 ---
+    st.divider()
+    st.subheader("📤 カレンダーの書き出し(エクスポート)")
+    st.caption("現在登録されているカレンダーをCSVファイルとして保存（バックアップ）できます。")
+    # 不要な「順番」列を除外して出力用のデータフレームを作成
+    export_df = st.session_state.calendar_df[["カレンダー名", "カレンダーID"]]
+    csv_data = export_df.to_csv(index=False, encoding='utf-8-sig')
+    st.download_button(
+        label="📄 CSVファイルをダウンロード",
+        data=csv_data,
+        file_name="my_calendars.csv",
+        mime="text/csv",
+        use_container_width=True
+    )
+
+    st.divider()
+    st.subheader("📥 カレンダーの一括インポート")
+    st.caption("CSVファイルから複数のカレンダーを一括で追加できます。")
+    
+    st.markdown("""
+    **【必要なCSVファイルの形式】**
+    * 拡張子: `.csv`
+    * 1行目（ヘッダー）は必ず `カレンダー名,カレンダーID` と記述してください。
+    * 2行目以降に追加したいデータを入力します（順番は自動で割り振られます）。
+    """)
+    
+    # テンプレートCSVの提供
+    sample_csv = "カレンダー名,カレンダーID\n仕事用,work@group.calendar.google.com\nプライベート,private@group.calendar.google.com"
+    st.download_button("📄 サンプルCSVをダウンロード", sample_csv, "sample_calendars.csv", "text/csv")
+    
+    # ファイルアップローダー
+    uploaded_file = st.file_uploader("CSVファイルをアップロード", type=["csv"])
+    if uploaded_file is not None:
+        if st.button("📥 インポートを実行", type="primary", use_container_width=True):
+            try:
+                try:
+                    df_import = pd.read_csv(uploaded_file, encoding='utf-8')
+                except UnicodeDecodeError:
+                    uploaded_file.seek(0)
+                    df_import = pd.read_csv(uploaded_file, encoding='shift_jis')
+
+                if "カレンダー名" in df_import.columns and "カレンダーID" in df_import.columns:
+                    save_cal_to_history()
+                    
+                    new_rows = []
+                    for _, row in df_import.iterrows():
+                        c_name = str(row["カレンダー名"]).strip()
+                        c_id = str(row["カレンダーID"]).strip()
+                        if c_name and c_id and c_name.lower() != "nan" and c_id.lower() != "nan":
+                            new_rows.append({"カレンダー名": c_name, "カレンダーID": c_id})
+
+                    if new_rows:
+                        new_df = pd.DataFrame(new_rows)
+                        temp_df = pd.concat([st.session_state.calendar_df, new_df], ignore_index=True)
+                        temp_df["順番"] = range(1, len(temp_df) + 1)
+                        st.session_state.calendar_df = temp_df
+                        st.success(f"✅ {len(new_rows)}件のカレンダーをインポートしました！")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ 追加できる有効なデータが見つかりませんでした。")
+                else:
+                    st.error("❌ CSVの1行目が正しくありません。「カレンダー名,カレンダーID」となっているか確認してください。")
+            except Exception as e:
+                st.error(f"❌ ファイルの読み込みに失敗しました: {e}")
 
     st.divider()
     st.subheader("⚙️ 工程ごとの登録先カレンダー設定")
@@ -644,13 +721,15 @@ elif st.session_state.current_page == "main":
     # ==========================================
     st.header("5. カレンダー登録")
 
+    cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
+    if not cal_options_display: cal_options_display = ["メインカレンダー"]
+
     if st.button("📅 カレンダーに登録", type="primary", use_container_width=True):
         try:
             with st.spinner("Googleカレンダーに通信中（複数予定を登録します）..."):
                 SCOPES = ['https://www.googleapis.com/auth/calendar']
                 creds = None
                 
-                # --- 【バグ修正・安全性強化】優先順位の逆転（Secrets > token.json） ---
                 if not st.session_state.force_logout:
                     if st.session_state.google_creds is not None:
                         creds = Credentials.from_authorized_user_info(json.loads(st.session_state.google_creds), SCOPES)
@@ -680,10 +759,17 @@ elif st.session_state.current_page == "main":
                 id_buffer = cal_options_ids[st.session_state.cal_sel_buffer] if st.session_state.cal_sel_buffer < len(cal_options_ids) else cal_options_ids[0]
                 id_main = cal_options_ids[st.session_state.cal_sel_main] if st.session_state.cal_sel_main < len(cal_options_ids) else cal_options_ids[0]
 
-                def insert_event(summary, start_datetime, end_datetime, cal_id, location=""):
+                # --- 【機能追加】タイトルへの所要時間の表示ロジック ---
+                def insert_event_with_duration(base_title, start_datetime, end_datetime, cal_id, location=""):
                     if start_datetime >= end_datetime:
                         end_datetime = start_datetime + timedelta(minutes=1)
-                    service.events().insert(calendarId=cal_id, body={'summary': summary, 'location': location, 'start': {'dateTime': start_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}, 'end': {'dateTime': end_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}}).execute()
+                    
+                    # 終了時刻から開始時刻を引いて、何分間かを計算
+                    duration_minutes = int((end_datetime - start_datetime).total_seconds() / 60)
+                    # タイトルに所要時間を追加
+                    final_title = f"{base_title} ({duration_minutes}分)"
+
+                    service.events().insert(calendarId=cal_id, body={'summary': final_title, 'location': location, 'start': {'dateTime': start_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}, 'end': {'dateTime': end_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}}).execute()
                     sys_time.sleep(0.3)
 
                 if travel_mode == "🚃 電車を利用する":
@@ -692,26 +778,26 @@ elif st.session_state.current_page == "main":
                     actual_arrive_dt = train_arrive_dt + timedelta(minutes=walk_to_dest)
                     clean_arrival_sta_for_cal = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else ""
 
-                    insert_event(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt, id_prep)
-                    insert_event(f"🚶 徒歩（自宅〜{depart_station}駅）：{event_title}", leave_home_dt, datetime.combine(event_date, train_depart_time), id_walk1)
+                    insert_event_with_duration(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt, id_prep)
+                    insert_event_with_duration(f"🚶 徒歩（自宅〜{depart_station}駅）：{event_title}", leave_home_dt, datetime.combine(event_date, train_depart_time), id_walk1)
                     if inc_train:
-                        insert_event(f"🚃 電車（{depart_station}駅〜{clean_arrival_sta_for_cal}駅）：{event_title}", datetime.combine(event_date, train_depart_time), train_arrive_dt, id_train)
-                    insert_event(f"🚶 徒歩（{clean_arrival_sta_for_cal}駅〜目的地）：{event_title}", train_arrive_dt, actual_arrive_dt, id_walk2)
+                        insert_event_with_duration(f"🚃 電車（{depart_station}駅〜{clean_arrival_sta_for_cal}駅）：{event_title}", datetime.combine(event_date, train_depart_time), train_arrive_dt, id_train)
+                    insert_event_with_duration(f"🚶 徒歩（{clean_arrival_sta_for_cal}駅〜目的地）：{event_title}", train_arrive_dt, actual_arrive_dt, id_walk2)
                     
                     if inc_buffer and (event_dt - actual_arrive_dt).total_seconds() > 60:
-                        insert_event(f"⏳ 待機（バッファ）：{event_title}", actual_arrive_dt, event_dt, id_buffer, location=full_destination_target)
+                        insert_event_with_duration(f"⏳ 待機（バッファ）：{event_title}", actual_arrive_dt, event_dt, id_buffer, location=full_destination_target)
                         
-                    insert_event(event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
+                    insert_event_with_duration(event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
                     st.success("✅ 準備から移動の詳細、本番までを各カレンダーに登録しました！")
 
                 else:
-                    insert_event(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt, id_prep)
-                    insert_event(f"🚶 徒歩（出発地〜目的地）：{event_title}", leave_home_dt, target_arrival_dt, id_walk1)
+                    insert_event_with_duration(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt, id_prep)
+                    insert_event_with_duration(f"🚶 徒歩（出発地〜目的地）：{event_title}", leave_home_dt, target_arrival_dt, id_walk1)
                     
                     if inc_buffer and (event_dt - target_arrival_dt).total_seconds() > 60:
-                        insert_event(f"⏳ 待機（バッファ）：{event_title}", target_arrival_dt, event_dt, id_buffer, location=full_destination_target)
+                        insert_event_with_duration(f"⏳ 待機（バッファ）：{event_title}", target_arrival_dt, event_dt, id_buffer, location=full_destination_target)
 
-                    insert_event(event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
+                    insert_event_with_duration(event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
                     st.success("✅ 準備、徒歩移動、本番の予定を各カレンダーに登録しました！")
 
             st.balloons()
@@ -734,11 +820,19 @@ elif st.session_state.current_page == "main":
     st.toggle("⏳ 待機（バッファ）時間を登録する", key="include_buffer_event")
 
     st.write("---")
-    with st.expander("▼ 工程ごとの登録先カレンダー設定", expanded=False):
-        st.caption("各予定をどのカレンダーに振り分けるかを選択できます。（設定画面のデフォルト値が初期セットされています）")
-        cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
-        if not cal_options_display: cal_options_display = ["メインカレンダー"]
+    st.write("▼ 本番の予定の登録先カレンダー")
+    st.selectbox("🎯 本番の予定", cal_options_display, index=get_safe_cal_idx("cal_sel_main", cal_options_display), key="cal_sel_main_widget_main", on_change=update_cal_sel, args=("cal_sel_main", "cal_sel_main_widget_main"), label_visibility="collapsed")
 
+    with st.expander("➕ 新しいカレンダーを追加", expanded=False):
+        st.caption("💡 新しいカレンダーを追加します。（リストの確認・削除や一括インポートは右上の「⚙️ 設定」メニューから）")
+        c1, c2 = st.columns([1, 1])
+        with c1: st.text_input("表示名", key="new_cal_name_input", placeholder="例：仕事用")
+        with c2: st.text_input("カレンダーID", key="new_cal_id_input", placeholder="例：xxx@group.calendar.google.com")
+        st.button("➕ 追加", key="add_cal_btn_main", use_container_width=True, on_click=add_new_calendar_callback)
+
+    st.write("---")
+    with st.expander("▼ その他の工程の登録先カレンダー設定", expanded=False):
+        st.caption("準備や移動など、裏方の予定をどのカレンダーに振り分けるかを選択できます。（設定画面のデフォルト値が初期セットされています）")
         with st.container(border=True):
             st.selectbox("① 🏠 準備", cal_options_display, index=get_safe_cal_idx("cal_sel_prep", cal_options_display), key="cal_sel_prep_widget_main", on_change=update_cal_sel, args=("cal_sel_prep", "cal_sel_prep_widget_main"))
             st.selectbox("② 🚶 自宅～出発駅（出発地〜目的地）", cal_options_display, index=get_safe_cal_idx("cal_sel_walk1", cal_options_display), key="cal_sel_walk1_widget_main", on_change=update_cal_sel, args=("cal_sel_walk1", "cal_sel_walk1_widget_main"))
@@ -746,4 +840,3 @@ elif st.session_state.current_page == "main":
                 st.selectbox("③ 🚃 電車（出発駅～到着駅）", cal_options_display, index=get_safe_cal_idx("cal_sel_train", cal_options_display), key="cal_sel_train_widget_main", on_change=update_cal_sel, args=("cal_sel_train", "cal_sel_train_widget_main"))
                 st.selectbox("④ 🚶 到着駅～目的地", cal_options_display, index=get_safe_cal_idx("cal_sel_walk2", cal_options_display), key="cal_sel_walk2_widget_main", on_change=update_cal_sel, args=("cal_sel_walk2", "cal_sel_walk2_widget_main"))
             st.selectbox("⑤ ⏳ 待機（バッファ）", cal_options_display, index=get_safe_cal_idx("cal_sel_buffer", cal_options_display), key="cal_sel_buffer_widget_main", on_change=update_cal_sel, args=("cal_sel_buffer", "cal_sel_buffer_widget_main"))
-            st.selectbox("⑥ 🎯 本番の予定", cal_options_display, index=get_safe_cal_idx("cal_sel_main", cal_options_display), key="cal_sel_main_widget_main", on_change=update_cal_sel, args=("cal_sel_main", "cal_sel_main_widget_main"))

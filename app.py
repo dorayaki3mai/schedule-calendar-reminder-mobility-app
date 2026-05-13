@@ -207,20 +207,26 @@ walk_to_dest = 0
 if travel_mode == "🚃 電車を利用する":
     
     with st.expander("🚃 STEP 2: 降車駅の検索と徒歩計算", expanded=True):
+        
+        # --- 【UI改善】目的地住所（cleaned_address）の有無で表示を切り分ける ---
         if cleaned_address:
             st.write("▼ 🚉 周辺の駅を探す")
             st.caption("Googleの検索アルゴリズムを利用して、目的地の周辺駅を探します。")
-            
             nearby_search_query = f"周辺の駅 around:{cleaned_address}"
             nearby_station_url = f"https://www.google.com/maps/search/{urllib.parse.quote(nearby_search_query)}"
             st.link_button("🔍 地図を開いて周辺の駅を探す（別タブ）", nearby_station_url, use_container_width=True)
 
-            st.write("▼ 🚉 目的地の近隣駅を入力")
-            arrival_station = st.text_input("地図を確認して近隣駅（降車駅）を入力してください", "", key="arrival_station_input")
+        # 住所入力の有無に関わらず、近隣駅の入力欄は常に表示させます。
+        st.write("▼ 🚉 目的地の近隣駅を入力")
+        arrival_station = st.text_input("地図を確認して近隣駅（降車駅）を入力してください", "", key="arrival_station_input")
 
-            if arrival_station:
-                route_search_url = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(arrival_station + '駅')}&destination={urllib.parse.quote(cleaned_address)}&travelmode=walking"
-                st.link_button(f"🚶‍♂️ {arrival_station}駅から目的地までのルートを確認", route_search_url, use_container_width=True)
+        # ルート確認ボタンは、「駅」と「住所」の両方が入力されている時だけ表示します。
+        if arrival_station and cleaned_address:
+            route_search_url = f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(arrival_station + '駅')}&destination={urllib.parse.quote(cleaned_address)}&travelmode=walking"
+            st.link_button(f"🚶‍♂️ {arrival_station}駅から目的地までのルートを確認", route_search_url, use_container_width=True)
+        elif arrival_station and not cleaned_address:
+            # 住所がない場合はルート検索ができないため、案内文を表示します。
+            st.caption("※STEP 1で「目的地住所」を入力すると、ここから目的地までの徒歩ルート確認ボタンが表示されます。")
 
         st.write("---")
         st.write(f"🚉 確定した駅: **{arrival_station if arrival_station else '（未入力）'}**")
@@ -314,10 +320,6 @@ if travel_mode == "🚃 電車を利用する":
         st.write("---")
         st.write("▼ 調べた電車の時刻を入力してください")
 
-        # --- 【機能改善】電車の時刻の初期値を現在時刻に設定 ---
-        # "train_dep_h" がセッションに存在しない（初回読み込み時）場合、
-        # now_with_tz から取得した現在時刻の「時」「分」を、裏のデータと入力欄表示の両方に確実にセットします。
-        # 電車の到着時刻も、同じ現在時刻で初期化します。
         if "train_dep_h" not in st.session_state:
             st.session_state.train_dep_h = now_with_tz.strftime("%H")
             st.session_state.input_train_dep_h = st.session_state.train_dep_h
@@ -332,7 +334,6 @@ if travel_mode == "🚃 電車を利用する":
             st.session_state.train_arr_m = now_with_tz.strftime("%M")
             st.session_state.input_train_arr_m = st.session_state.train_arr_m
 
-        # 出発時刻が変更されたとき、到着時刻も同じ時間で上書き連動させる関数
         def sync_train_arrive_time():
             st.session_state.train_arr_h = st.session_state.train_dep_h
             st.session_state.train_arr_m = st.session_state.train_dep_m

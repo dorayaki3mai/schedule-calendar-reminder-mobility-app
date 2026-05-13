@@ -41,7 +41,6 @@ div[data-baseweb="input"] input {
 # データ管理系の初期化
 # ==========================================
 
-# --- 【UI改善】多階層画面遷移のための状態管理 ---
 if "current_page" not in st.session_state:
     st.session_state.current_page = "main"
 
@@ -182,7 +181,6 @@ if st.session_state.current_page == "settings":
     st.caption("アプリの各種設定やデータの管理を行います。")
     st.write("---")
 
-    # 基本設定などはこれまで通りエキスパンダーで表示
     with st.expander("🌍 一般設定 (タイムゾーン)", expanded=False):
         st.caption("海外へ移動した際などに変更してください。")
         tz_options = ["Asia/Tokyo", "UTC", "US/Pacific", "Europe/London", "Asia/Shanghai"]
@@ -267,10 +265,7 @@ if st.session_state.current_page == "settings":
                 st.write("")
 
     st.write("---")
-    
-    # --- 【UI改善】詳細画面への遷移ボタン群 ---
     st.caption("詳細設定")
-    # CSSを使ってボタンのテキストを左寄せにするラッパーを使用
     st.markdown('<div class="menu-button">', unsafe_allow_html=True)
     st.button("🚉 出発駅リストの管理  ＞", on_click=go_to_settings_stations, use_container_width=True)
     st.button("🏠 徒歩時間ワンタッチボタンの管理  ＞", on_click=go_to_settings_presets, use_container_width=True)
@@ -520,7 +515,15 @@ elif st.session_state.current_page == "main":
             display_sta = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else "〇〇"
             st.success(f"🚃 **{display_sta}駅** に **{train_deadline_dt.strftime('%H:%M')}** までに到着する電車を探します。")
 
-        with st.expander("🚃 STEP 3: ルート検索と電車の時刻入力", expanded=True):
+        # --- 【UI改善】STEP3の分割と再構築（データ抽出） ---
+        valid_stations = [s for s in st.session_state.station_df["出発駅名"].tolist() if s and str(s).strip() != ""]
+        if not valid_stations: valid_stations = ["駅名を入力してください"]
+        
+        if "selected_depart_station" not in st.session_state or st.session_state.selected_depart_station not in valid_stations:
+            st.session_state.selected_depart_station = valid_stations[0]
+
+        # --- ① 出発駅を探す専用のエキスパンダー ---
+        with st.expander("🔍 出発駅を探す・追加・全リスト", expanded=False):
             st.write("▼ 📍 現在地から出発駅を探す")
             if st.toggle("🌍 GPSを起動して現在地を取得する", value=False):
                 loc = streamlit_js_eval(js_expressions="new Promise((res, rej) => { navigator.geolocation.getCurrentPosition((p) => { res({lat: p.coords.latitude, lng: p.coords.longitude}); }, (e) => { res({error: e.message}); }, {enableHighAccuracy: true, timeout: 10000, maximumAge: 0}); })", key="gps_promise_fetch")
@@ -539,16 +542,22 @@ elif st.session_state.current_page == "main":
             with c2: st.button("➕ 追加", key="add_station_btn", use_container_width=True, on_click=add_new_station_callback)
 
             st.write("---")
-            
-            valid_stations = [s for s in st.session_state.station_df["出発駅名"].tolist() if s and str(s).strip() != ""]
-            if not valid_stations: valid_stations = ["駅名を入力してください"]
-            
-            if "selected_depart_station" not in st.session_state or st.session_state.selected_depart_station not in valid_stations:
-                st.session_state.selected_depart_station = valid_stations[0]
+            st.write("▼ リストから選択")
+            st.caption("登録されているすべての駅から選択します。")
+            current_index = valid_stations.index(st.session_state.selected_depart_station) if st.session_state.selected_depart_station in valid_stations else 0
+            st.selectbox(
+                "出発駅", 
+                valid_stations, 
+                index=current_index, 
+                key="sb_depart_station",
+                on_change=update_depart_station_from_sb,
+                label_visibility="collapsed"
+            )
 
-            st.write("▼ 今回利用する出発駅を選択")
+        # --- ② ワンタッチ選択と ③ ジョルダン検索を STEP3の先頭に ---
+        with st.expander("🚃 STEP 3: ルート検索と電車の時刻入力", expanded=True):
+            st.write("▼ 今回利用する出発駅を選択（ワンタッチ）")
             
-            st.caption("👆 ワンタッチ選択")
             btn_stations = valid_stations[:6]
             cols = st.columns(3)
             for i, sta in enumerate(btn_stations):
@@ -563,23 +572,14 @@ elif st.session_state.current_page == "main":
                         args=(sta,)
                     )
 
-            st.caption("🔽 リストから選択")
-            current_index = valid_stations.index(st.session_state.selected_depart_station) if st.session_state.selected_depart_station in valid_stations else 0
-            st.selectbox(
-                "出発駅", 
-                valid_stations, 
-                index=current_index, 
-                key="sb_depart_station",
-                on_change=update_depart_station_from_sb,
-                label_visibility="collapsed"
-            )
-            
+            # 選ばれた駅を変数に確保してジョルダンに渡す
             depart_station = st.session_state.selected_depart_station
-
             clean_arrival_sta_for_jorudan = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else ""
-            
             jorudan_params = {"eki1": depart_station, "eki2": clean_arrival_sta_for_jorudan, "Dym": event_date.strftime("%Y%m"), "Ddd": event_date.strftime("%d"), "Dhh": train_deadline_dt.strftime("%H"), "Dmn1": str(train_deadline_dt.minute // 10), "Dmn2": str(train_deadline_dt.minute % 10), "Cway": "1"}
-            st.link_button("↗️ ジョルダン乗換案内でルートを検索", "https://www.jorudan.co.jp/norikae/cgi/nori.cgi?" + urllib.parse.urlencode(jorudan_params))
+            
+            st.write("---")
+            st.write("▼ ジョルダン乗換案内でルートを検索")
+            st.link_button("↗️ ジョルダン乗換案内を開く", "https://www.jorudan.co.jp/norikae/cgi/nori.cgi?" + urllib.parse.urlencode(jorudan_params), use_container_width=True)
 
             st.write("---")
             st.write("▼ 調べた電車の時刻を入力してください")

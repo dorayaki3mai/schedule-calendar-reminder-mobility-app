@@ -16,6 +16,8 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+import requests # メールアドレス取得用
+
 # --- GPS取得用のライブラリ ---
 from streamlit_js_eval import streamlit_js_eval
 
@@ -92,6 +94,10 @@ if "include_buffer_event" not in st.session_state: st.session_state.include_buff
 
 if "google_creds" not in st.session_state: st.session_state.google_creds = None
 if "force_logout" not in st.session_state: st.session_state.force_logout = False
+
+# --- 【機能追加】連携中のメールアドレスを記憶 ---
+if "linked_email" not in st.session_state: st.session_state.linked_email = ""
+
 
 def save_cal_to_history():
     snapshot = st.session_state.calendar_df.copy()
@@ -197,7 +203,13 @@ if st.session_state.current_page == "settings":
 
     with st.expander("👤 カレンダーアカウント連携", expanded=False):
         st.caption("連携しているGoogleアカウントの接続解除・切り替えを行います。")
-        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        
+        # --- 【バグ修正・機能追加】メールアドレスも取得するためのSCOPEを追加 ---
+        SCOPES = [
+            'https://www.googleapis.com/auth/calendar',
+            'https://www.googleapis.com/auth/userinfo.email',
+            'openid'
+        ]
         
         is_authenticated = False
         auth_method = ""
@@ -214,11 +226,13 @@ if st.session_state.current_page == "settings":
                 auth_method = "💻 ローカルファイルで連携されています（開発用）"
 
         if is_authenticated:
-            st.success(f"✅ 現在のアカウントは連携済みです\n\n({auth_method})")
+            email_info = f"\n📧 連携中: **{st.session_state.linked_email}**" if st.session_state.linked_email else ""
+            st.success(f"✅ 現在のアカウントは連携済みです\n\n({auth_method}){email_info}")
             if st.button("🗑️ アカウント連携を解除する", use_container_width=True):
                 try:
                     if os.path.exists('token.json'): os.remove('token.json')
                     st.session_state.google_creds = None
+                    st.session_state.linked_email = ""
                     if "oauth_flow" in st.session_state: del st.session_state["oauth_flow"]
                     st.session_state.force_logout = True
                     st.rerun()
@@ -243,6 +257,14 @@ if st.session_state.current_page == "settings":
                         creds = flow.credentials
                         st.session_state.google_creds = creds.to_json()
                         with open('token.json', 'w') as token: token.write(creds.to_json())
+                        
+                        # --- 【機能追加】認証成功時にメールアドレスを取得して記憶 ---
+                        try:
+                            user_info_response = requests.get('https://www.googleapis.com/oauth2/v1/userinfo', headers={'Authorization': f'Bearer {creds.token}'})
+                            st.session_state.linked_email = user_info_response.json().get('email', '')
+                        except:
+                            st.session_state.linked_email = "取得失敗"
+
                         st.session_state.force_logout = False
                         st.success("✅ 認証成功！メイン画面からカレンダーに登録できます。")
                         st.rerun()
@@ -299,11 +321,9 @@ elif st.session_state.current_page == "settings_calendars":
                     st.rerun()
             st.write("")
 
-    # --- 【機能追加】CSVエクスポート機能 ---
     st.divider()
     st.subheader("📤 カレンダーの書き出し(エクスポート)")
     st.caption("現在登録されているカレンダーをCSVファイルとして保存（バックアップ）できます。")
-    # 不要な「順番」列を除外して出力用のデータフレームを作成
     export_df = st.session_state.calendar_df[["カレンダー名", "カレンダーID"]]
     csv_data = export_df.to_csv(index=False, encoding='utf-8-sig')
     st.download_button(
@@ -325,11 +345,9 @@ elif st.session_state.current_page == "settings_calendars":
     * 2行目以降に追加したいデータを入力します（順番は自動で割り振られます）。
     """)
     
-    # テンプレートCSVの提供
     sample_csv = "カレンダー名,カレンダーID\n仕事用,work@group.calendar.google.com\nプライベート,private@group.calendar.google.com"
     st.download_button("📄 サンプルCSVをダウンロード", sample_csv, "sample_calendars.csv", "text/csv")
     
-    # ファイルアップローダー
     uploaded_file = st.file_uploader("CSVファイルをアップロード", type=["csv"])
     if uploaded_file is not None:
         if st.button("📥 インポートを実行", type="primary", use_container_width=True):
@@ -449,6 +467,20 @@ elif st.session_state.current_page == "main":
     with col_settings: st.button("⚙️ 設定", on_click=go_to_settings, use_container_width=True)
 
     st.write(f"現在の設定時刻: **{now_with_tz.strftime('%Y/%m/%d %H:%M:%S')}** ({st.session_state.app_timezone})")
+
+    main_cal_idx = get_safe_cal_idx("cal_sel_main", st.session_state.calendar_df)
+    main_cal_id = st.session_state.calendar_df.iloc[main_cal_idx]['カレンダーID']
+    if main_cal_id == 'primary':
+        cal_target_url = "https://calendar.google.com/calendar/r"
+    else:
+        cal_target_url = f"https://calendar.google.com/calendar/r?cid={urllib.parse.quote(main_cal_id)}"
+
+    # --- 【UI改修】ボタンのラベルに連携中のメールアドレスを表示して注意喚起 ---
+    btn_label = f"📅 カレンダーを確認 ({st.session_state.linked_email})" if st.session_state.linked_email else "📅 カレンダーを確認"
+    st.link_button(btn_label, cal_target_url, use_container_width=True)
+    if st.session_state.linked_email:
+        st.caption("※違うアカウントが開く場合は、ブラウザ右上のアイコンから連携中のアカウントに切り替えてください。")
+
 
     def clean_address(addr):
         if not addr: return ""
@@ -759,14 +791,11 @@ elif st.session_state.current_page == "main":
                 id_buffer = cal_options_ids[st.session_state.cal_sel_buffer] if st.session_state.cal_sel_buffer < len(cal_options_ids) else cal_options_ids[0]
                 id_main = cal_options_ids[st.session_state.cal_sel_main] if st.session_state.cal_sel_main < len(cal_options_ids) else cal_options_ids[0]
 
-                # --- 【機能追加】タイトルへの所要時間の表示ロジック ---
                 def insert_event_with_duration(base_title, start_datetime, end_datetime, cal_id, location=""):
                     if start_datetime >= end_datetime:
                         end_datetime = start_datetime + timedelta(minutes=1)
                     
-                    # 終了時刻から開始時刻を引いて、何分間かを計算
                     duration_minutes = int((end_datetime - start_datetime).total_seconds() / 60)
-                    # タイトルに所要時間を追加
                     final_title = f"{base_title} ({duration_minutes}分)"
 
                     service.events().insert(calendarId=cal_id, body={'summary': final_title, 'location': location, 'start': {'dateTime': start_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}, 'end': {'dateTime': end_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}}).execute()
@@ -809,6 +838,13 @@ elif st.session_state.current_page == "main":
                 st.info("💡 **【解決策】**\n1. 登録したカレンダーID（@group.calendar.google.comなど）に間違いがないか確認してください。\n2. 「⚙️ 設定」の「👤 カレンダーアカウント連携」を開き、一度【連携を解除】してから、再度お使いのGoogleアカウントで連携し直してください。")
             else:
                 st.error(f"❌ 登録失敗: {e}")
+
+    # --- 【機能追加】STEP 5 側のカレンダー確認ボタン ---
+    btn_label_step5 = f"📅 カレンダーを確認 ({st.session_state.linked_email})" if st.session_state.linked_email else "📅 カレンダーを確認"
+    st.link_button(btn_label_step5, cal_target_url, use_container_width=True)
+    if st.session_state.linked_email:
+        st.caption("※違うアカウントが開く場合は、ブラウザ右上のアイコンから連携中のアカウントに切り替えてください。")
+
 
     st.write("---")
     st.write("▼ 登録オプション")

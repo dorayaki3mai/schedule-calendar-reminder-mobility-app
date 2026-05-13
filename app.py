@@ -18,9 +18,20 @@ from googleapiclient.discovery import build
 from streamlit_js_eval import streamlit_js_eval
 
 # ==========================================
-# 0. システム設定（タイムゾーン）
+# 0. システム設定（タイムゾーンとCSS）
 # ==========================================
 st.set_page_config(page_title="スケジュール＆移動ルーター", layout="centered")
+
+# --- 入力欄の文字を中央揃えにしてドラムロールらしく見せるCSS ---
+st.markdown("""
+<style>
+div[data-baseweb="input"] input {
+    text-align: center;
+    font-size: 18px;
+    font-weight: bold;
+}
+</style>
+""", unsafe_allow_html=True)
 
 st.sidebar.header("⚙️ システム設定")
 tz_options = ["Asia/Tokyo", "UTC", "US/Pacific", "Europe/London", "Asia/Shanghai"]
@@ -41,6 +52,43 @@ def clean_address(addr):
     return addr.strip()
 
 # ==========================================
+# ドラムロール＋自由入力のハイブリッドコンポーネント
+# ==========================================
+def render_hybrid_time_picker(label, state_key, max_value, on_change_callback=None):
+    input_key = f"input_{state_key}"
+
+    def increment():
+        val = int(st.session_state[state_key])
+        new_val = (val + 1) % max_value
+        st.session_state[state_key] = f"{new_val:02d}"
+        st.session_state[input_key] = f"{new_val:02d}"
+        if on_change_callback: on_change_callback()
+
+    def decrement():
+        val = int(st.session_state[state_key])
+        new_val = (val - 1) % max_value
+        st.session_state[state_key] = f"{new_val:02d}"
+        st.session_state[input_key] = f"{new_val:02d}"
+        if on_change_callback: on_change_callback()
+
+    def manual_update():
+        raw = st.session_state[input_key]
+        raw = str(raw).translate(str.maketrans('０１２３４５６７８９', '0123456789'))
+        try:
+            val = int(raw)
+            val = val % max_value
+            st.session_state[state_key] = f"{val:02d}"
+            st.session_state[input_key] = f"{val:02d}"
+        except ValueError:
+            st.session_state[input_key] = st.session_state[state_key]
+        if on_change_callback: on_change_callback()
+
+    st.markdown(f"<div style='text-align:center; font-size:14px; color:gray;'>{label}</div>", unsafe_allow_html=True)
+    st.button("▲", key=f"up_{state_key}", on_click=increment, use_container_width=True)
+    st.text_input("hidden", key=input_key, label_visibility="collapsed", on_change=manual_update)
+    st.button("▼", key=f"down_{state_key}", on_click=decrement, use_container_width=True)
+
+# ==========================================
 # STEP 1: 予定開始時間と目的地の設定
 # ==========================================
 st.header("1. 予定と目的地の設定")
@@ -53,7 +101,6 @@ if facility_name:
     st.link_button(f"🔍 「{facility_name}」の住所をGoogleで検索", google_search_url)
 
 event_address_full = st.text_input("目的地住所（ビル・マンション名まで含む）", "")
-
 cleaned_address = clean_address(event_address_full)
 full_destination_target = f"{facility_name} {event_address_full}".strip()
 
@@ -66,16 +113,21 @@ if event_address_full:
 st.write("---")
 event_date = st.date_input("予定の日付", datetime.today())
 
+# --- 予定時間の初期化 ---
 if "start_h" not in st.session_state:
     st.session_state.start_h = now_with_tz.strftime("%H")
+    st.session_state.input_start_h = st.session_state.start_h
 if "start_m" not in st.session_state:
     st.session_state.start_m = now_with_tz.strftime("%M")
+    st.session_state.input_start_m = st.session_state.start_m
 
 if "end_h" not in st.session_state:
     init_end_time = now_with_tz + timedelta(hours=1)
     st.session_state.end_h = init_end_time.strftime("%H")
+    st.session_state.input_end_h = st.session_state.end_h
 if "end_m" not in st.session_state:
     st.session_state.end_m = now_with_tz.strftime("%M")
+    st.session_state.input_end_m = st.session_state.end_m
 
 def sync_end_time():
     h = int(st.session_state.start_h)
@@ -83,22 +135,26 @@ def sync_end_time():
     end_h = (h + 1) % 24
     st.session_state.end_h = f"{end_h:02d}"
     st.session_state.end_m = m
+    st.session_state.input_end_h = f"{end_h:02d}"
+    st.session_state.input_end_m = m
 
 st.write("🕒 **予定開始時間**")
-col_s_h, col_s_m = st.columns(2)
-with col_s_h:
-    start_hour = st.selectbox("開始（時）", [f"{i:02d}" for i in range(24)], key="start_h", on_change=sync_end_time)
-with col_s_m:
-    start_minute = st.selectbox("開始（分）", [f"{i:02d}" for i in range(60)], key="start_m", on_change=sync_end_time)
-start_time = time(int(start_hour), int(start_minute))
+with st.container(border=True):
+    col_s_h, col_s_m = st.columns(2)
+    with col_s_h:
+        render_hybrid_time_picker("時", "start_h", 24, sync_end_time)
+    with col_s_m:
+        render_hybrid_time_picker("分", "start_m", 60, sync_end_time)
+start_time = time(int(st.session_state.start_h), int(st.session_state.start_m))
 
 st.write("🕒 **予定終了時間**")
-col_e_h, col_e_m = st.columns(2)
-with col_e_h:
-    end_hour = st.selectbox("終了（時）", [f"{i:02d}" for i in range(24)], key="end_h")
-with col_e_m:
-    end_minute = st.selectbox("終了（分）", [f"{i:02d}" for i in range(60)], key="end_m")
-end_time = time(int(end_hour), int(end_minute))
+with st.container(border=True):
+    col_e_h, col_e_m = st.columns(2)
+    with col_e_h:
+        render_hybrid_time_picker("時", "end_h", 24)
+    with col_e_m:
+        render_hybrid_time_picker("分", "end_m", 60)
+end_time = time(int(st.session_state.end_h), int(st.session_state.end_m))
 
 st.write("---")
 arrival_buffer_option = st.selectbox(
@@ -139,7 +195,6 @@ with col_mode2:
 
 travel_mode = st.session_state.travel_mode
 
-# 変数を初期化（エラー防止）
 train_depart_time = None
 train_arrive_time = None
 depart_station = ""
@@ -147,7 +202,7 @@ arrival_station = st.session_state.get('arrival_station_input', "")
 walk_to_dest = 0
 
 # ==========================================
-# STEP 2 & 3: 電車を利用する場合のみ表示するエリア
+# STEP 2 & 3: 電車を利用する場合のみ表示
 # ==========================================
 if travel_mode == "🚃 電車を利用する":
     
@@ -259,34 +314,48 @@ if travel_mode == "🚃 電車を利用する":
         st.write("---")
         st.write("▼ 調べた電車の時刻を入力してください")
 
+        # --- 【機能改善】電車の時刻の初期値を現在時刻に設定 ---
+        # "train_dep_h" がセッションに存在しない（初回読み込み時）場合、
+        # now_with_tz から取得した現在時刻の「時」「分」を、裏のデータと入力欄表示の両方に確実にセットします。
+        # 電車の到着時刻も、同じ現在時刻で初期化します。
         if "train_dep_h" not in st.session_state:
             st.session_state.train_dep_h = now_with_tz.strftime("%H")
+            st.session_state.input_train_dep_h = st.session_state.train_dep_h
         if "train_dep_m" not in st.session_state:
             st.session_state.train_dep_m = now_with_tz.strftime("%M")
+            st.session_state.input_train_dep_m = st.session_state.train_dep_m
+        
         if "train_arr_h" not in st.session_state:
             st.session_state.train_arr_h = now_with_tz.strftime("%H")
+            st.session_state.input_train_arr_h = st.session_state.train_arr_h
         if "train_arr_m" not in st.session_state:
             st.session_state.train_arr_m = now_with_tz.strftime("%M")
+            st.session_state.input_train_arr_m = st.session_state.train_arr_m
 
+        # 出発時刻が変更されたとき、到着時刻も同じ時間で上書き連動させる関数
         def sync_train_arrive_time():
             st.session_state.train_arr_h = st.session_state.train_dep_h
             st.session_state.train_arr_m = st.session_state.train_dep_m
+            st.session_state.input_train_arr_h = st.session_state.train_dep_h
+            st.session_state.input_train_arr_m = st.session_state.train_dep_m
 
         st.write("🚃 **確定した電車の 出発時刻**")
-        col_td_h, col_td_m = st.columns(2)
-        with col_td_h:
-            train_depart_hour = st.selectbox("出発（時）", [f"{i:02d}" for i in range(24)], key="train_dep_h", on_change=sync_train_arrive_time)
-        with col_td_m:
-            train_depart_minute = st.selectbox("出発（分）", [f"{i:02d}" for i in range(60)], key="train_dep_m", on_change=sync_train_arrive_time)
-        train_depart_time = time(int(train_depart_hour), int(train_depart_minute))
+        with st.container(border=True):
+            col_td_h, col_td_m = st.columns(2)
+            with col_td_h:
+                render_hybrid_time_picker("時", "train_dep_h", 24, sync_train_arrive_time)
+            with col_td_m:
+                render_hybrid_time_picker("分", "train_dep_m", 60, sync_train_arrive_time)
+        train_depart_time = time(int(st.session_state.train_dep_h), int(st.session_state.train_dep_m))
 
         st.write("🚃 **確定した電車の 到着時刻**")
-        col_ta_h, col_ta_m = st.columns(2)
-        with col_ta_h:
-            train_arrive_hour = st.selectbox("到着（時）", [f"{i:02d}" for i in range(24)], key="train_arr_h")
-        with col_ta_m:
-            train_arrive_minute = st.selectbox("到着（分）", [f"{i:02d}" for i in range(60)], key="train_arr_m")
-        train_arrive_time = time(int(train_arrive_hour), int(train_arrive_minute))
+        with st.container(border=True):
+            col_ta_h, col_ta_m = st.columns(2)
+            with col_ta_h:
+                render_hybrid_time_picker("時", "train_arr_h", 24)
+            with col_ta_m:
+                render_hybrid_time_picker("分", "train_arr_m", 60)
+        train_arrive_time = time(int(st.session_state.train_arr_h), int(st.session_state.train_arr_m))
 
 
 # ==========================================
@@ -342,10 +411,8 @@ if travel_mode == "🚃 電車を利用する":
     start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
 
 else:
-    # --- 【機能追加】徒歩のみモードの場合、現在地〜目的地のルート検索ボタンを表示 ---
     st.write("▼ 🗺️ 目的地までの徒歩ルートと時間を確認")
     if cleaned_address:
-        # origin(出発地)を省略することで、Google Mapsが開いた端末の現在地を自動的に出発地にしてくれます。
         direct_walk_url = f"https://www.google.com/maps/dir/?api=1&destination={urllib.parse.quote(cleaned_address)}&travelmode=walking"
         st.link_button("🚶‍♂️ 現在地から目的地までの徒歩ルートをGoogle Mapで確認", direct_walk_url, use_container_width=True)
         st.caption("※Googleマップで表示された「徒歩〇〇分」の数字を、下の入力欄にセットしてください。")

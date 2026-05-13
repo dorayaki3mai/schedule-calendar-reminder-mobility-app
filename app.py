@@ -301,9 +301,6 @@ elif st.session_state.current_page == "main":
     def render_hybrid_time_picker(label, state_key, max_value, on_change_callback=None):
         input_key = f"input_{state_key}"
         
-        # --- 【バグ修正】Streamlitの画面遷移による値の消失（クリーンアップ）対策 ---
-        # 画面が切り替わって入力欄の記憶(input_key)が自動消去されてしまった場合、
-        # 安全な裏側の記憶(state_key)から値をコピーして復元し、空欄になるのを防ぎます。
         if input_key not in st.session_state and state_key in st.session_state:
             st.session_state[input_key] = st.session_state[state_key]
 
@@ -327,9 +324,10 @@ elif st.session_state.current_page == "main":
             if on_change_callback: on_change_callback()
 
         st.markdown(f"<div style='text-align:center; font-size:14px; color:gray;'>{label}</div>", unsafe_allow_html=True)
-        st.button("▲", key=f"up_{state_key}", on_click=increment, use_container_width=True)
+        # --- 【UI動作変更】▲を押すと時間が戻る(decrement)、▼を押すと時間が進む(increment) ---
+        st.button("▲", key=f"up_{state_key}", on_click=decrement, use_container_width=True)
         st.text_input("hidden", key=input_key, label_visibility="collapsed", on_change=manual_update)
-        st.button("▼", key=f"down_{state_key}", on_click=decrement, use_container_width=True)
+        st.button("▼", key=f"down_{state_key}", on_click=increment, use_container_width=True)
 
     # ==========================================
     # STEP 1: 予定開始時間と目的地の設定
@@ -338,8 +336,12 @@ elif st.session_state.current_page == "main":
 
     event_title = st.text_input("予定のタイトル", "")
     facility_name = st.text_input("施設名（目的地）", "")
+    
     if facility_name:
-        st.link_button(f"🔍 「{facility_name}」の住所をGoogleで検索", f"https://www.google.com/search?q={urllib.parse.quote(facility_name + ' 住所')}")
+        st.link_button(
+            f"🗺️ 「{facility_name}」をGoogleマップで探す", 
+            f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(facility_name)}"
+        )
 
     event_address_full = st.text_input("目的地住所（ビル・マンション名まで含む）", "")
     cleaned_address = clean_address(event_address_full)

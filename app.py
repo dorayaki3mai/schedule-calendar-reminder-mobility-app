@@ -10,6 +10,8 @@ import os.path
 import os
 # タイムゾーン操作用
 import pytz
+# --- 【バグ修正】API連続呼び出し制限を回避するためのtimeモジュール ---
+import time as sys_time
 # Google Calendar API連携用
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -119,20 +121,17 @@ def save_cal_to_history():
 # 安全な追加・同期用のコールバック関数
 # ==========================================
 
-# --- 【バグ修正】文字（String）をインデックス（整数）に変換して記憶する ---
 def update_cal_sel(state_key, widget_key):
     selected_val = st.session_state[widget_key]
     cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
     if not cal_options_display:
         cal_options_display = ["メインカレンダー"]
     
-    # 選択された名前がリストの何番目か（インデックス）を取得して保存
     try:
         st.session_state[state_key] = cal_options_display.index(selected_val)
     except ValueError:
         st.session_state[state_key] = 0
 
-# --- 【バグ修正】カレンダー削除時のインデックスエラー(Out of range)を防ぐ安全装置 ---
 def get_safe_cal_idx(state_key, options_list):
     idx = st.session_state.get(state_key, 0)
     return idx if 0 <= idx < len(options_list) else 0
@@ -322,7 +321,6 @@ elif st.session_state.current_page == "settings_calendars":
     if not cal_options_display:
         cal_options_display = ["メインカレンダー"]
 
-    # --- 【バグ修正】安全なインデックス取得(get_safe_cal_idx)をすべてのプルダウンに適用 ---
     with st.container(border=True):
         st.selectbox("① 🏠 準備", cal_options_display, index=get_safe_cal_idx("cal_sel_prep", cal_options_display), key="cal_sel_prep_widget_set", on_change=update_cal_sel, args=("cal_sel_prep", "cal_sel_prep_widget_set"))
         st.selectbox("② 🚶 自宅～出発駅（出発地〜目的地）", cal_options_display, index=get_safe_cal_idx("cal_sel_walk1", cal_options_display), key="cal_sel_walk1_widget_set", on_change=update_cal_sel, args=("cal_sel_walk1", "cal_sel_walk1_widget_set"))
@@ -735,7 +733,7 @@ elif st.session_state.current_page == "main":
 
     if st.button("📅 カレンダーに登録", type="primary", use_container_width=True):
         try:
-            with st.spinner("Googleカレンダーに通信中..."):
+            with st.spinner("Googleカレンダーに通信中（複数予定を登録します）..."):
                 SCOPES = ['https://www.googleapis.com/auth/calendar']
                 creds = None
                 if os.path.exists('token.json'):
@@ -765,8 +763,12 @@ elif st.session_state.current_page == "main":
                 id_buffer = cal_options_ids[st.session_state.cal_sel_buffer] if st.session_state.cal_sel_buffer < len(cal_options_ids) else cal_options_ids[0]
                 id_main = cal_options_ids[st.session_state.cal_sel_main] if st.session_state.cal_sel_main < len(cal_options_ids) else cal_options_ids[0]
 
+                # --- 【バグ修正】0分の予定を1分に補正 ＆ 連続送信時の0.3秒スリープを追加 ---
                 def insert_event(summary, start_datetime, end_datetime, cal_id, location=""):
+                    if start_datetime >= end_datetime:
+                        end_datetime = start_datetime + timedelta(minutes=1)
                     service.events().insert(calendarId=cal_id, body={'summary': summary, 'location': location, 'start': {'dateTime': start_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}, 'end': {'dateTime': end_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}}).execute()
+                    sys_time.sleep(0.3)
 
                 if travel_mode == "🚃 電車を利用する":
                     train_arrive_dt = datetime.combine(event_date, train_arrive_time)
@@ -800,8 +802,14 @@ elif st.session_state.current_page == "main":
                     st.success("✅ 準備、徒歩移動、本番の予定を各カレンダーに登録しました！")
 
             st.balloons()
+        # --- 【バグ修正・UI改善】404エラー時の親切なガイダンス表示 ---
         except Exception as e:
-            st.error(f"❌ 登録失敗: {e}")
+            error_str = str(e)
+            if "404" in error_str and "notFound" in error_str:
+                st.error("❌ 登録失敗: 指定された「カレンダーID」が見つからないか、連携中のアカウントにアクセス権限がありません。")
+                st.info("💡 **【解決策】**\n1. 右上の「⚙️ 設定」>「詳細設定」>「📅 登録先カレンダーの管理」で、登録したID（@group.calendar.google.comなど）に間違いや前後の空白がないか確認してください。\n2. 「👤 カレンダーアカウント連携」で現在ログインしているGoogleアカウントが、そのカレンダーの【変更権限】を持っているか確認してください。（別のアカウントでログインしている可能性があります）")
+            else:
+                st.error(f"❌ 登録失敗: {e}")
 
     st.write("---")
     st.write("▼ 登録オプション")
@@ -812,7 +820,6 @@ elif st.session_state.current_page == "main":
     st.caption("目標到着時刻と予定開始時刻の間に隙間がある場合、待機時間として登録します。")
     st.toggle("⏳ 待機（バッファ）時間を登録する", key="include_buffer_event")
 
-    # --- 【バグ修正】安全なインデックス取得をメイン画面側にも適用 ---
     st.write("---")
     with st.expander("▼ 工程ごとの登録先カレンダー設定", expanded=False):
         st.caption("各予定をどのカレンダーに振り分けるかを選択できます。（設定画面のデフォルト値が初期セットされています）")

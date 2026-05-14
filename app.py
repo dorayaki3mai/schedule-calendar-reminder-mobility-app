@@ -268,8 +268,12 @@ def get_safe_cal_idx(state_key, options_list):
     return idx if 0 <= idx < len(options_list) else 0
 
 def set_walk_time_callback(mins):
+    # ▼変更：裏の金庫(main_)の更新▼
     st.session_state.main_walk_time_train = mins
     st.session_state.main_walk_time_direct = mins
+    # ▼追加：表の入力欄(ui_)も同時に書き換えて即座に反映させる▼
+    st.session_state.ui_walk_time_train = mins
+    st.session_state.ui_walk_time_direct = mins
 
 def add_new_calendar_callback():
     name = st.session_state.new_cal_name_input.strip()
@@ -649,7 +653,6 @@ elif st.session_state.current_page == "settings_defaults":
 
     st.write("---")
     
-    # ▼変更：強制削除をやめ、直接上書きする▼
     if st.button("💾 設定を保存して反映する", type="primary", use_container_width=True):
         st.session_state.def_walk_time_direct = new_walk_time_direct
         st.session_state.def_walk_time_train = new_walk_time_train
@@ -841,7 +844,6 @@ elif st.session_state.current_page == "main":
             st.write(f"**🚉 降車する駅**: **{current_arrival_station if current_arrival_station else '（未入力）'}**")
             st.write("---")
             
-            # ▼変更：分離作戦を適用してバグを防ぎ、値を確実に記録する▼
             walk_to_dest = st.number_input(f"**▼駅から目的地までの移動時間（分）**", value=st.session_state.main_walk_to_dest, key="ui_walk_to_dest", step=1)
             st.session_state.main_walk_to_dest = walk_to_dest
             
@@ -946,13 +948,11 @@ elif st.session_state.current_page == "main":
 
     if travel_mode == "🚃 電車を利用する":
         st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼現在地から【利用する出発駅】までの移動時間（分）</p>', unsafe_allow_html=True)
-        # ▼変更：分離作戦を適用してバグを防ぎ、値を確実に記録する▼
         walk_to_station = st.number_input("", value=st.session_state.main_walk_time_train, key="ui_walk_time_train", step=1, label_visibility="collapsed")
         st.session_state.main_walk_time_train = walk_to_station
         
         st.write("---")
         st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼移動前の準備（仕度）時間（分）</p>', unsafe_allow_html=True)
-        # ▼変更：分離作戦を適用してバグを防ぎ、値を確実に記録する▼
         prep_time = st.number_input("", value=st.session_state.main_prep_time_train, step=1, key="ui_prep_time_train", label_visibility="collapsed")
         st.session_state.main_prep_time_train = prep_time
         
@@ -977,13 +977,11 @@ elif st.session_state.current_page == "main":
             else: st.warning("**目的地が入力されていません。**")
             
         st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼現在地から【目的地】までの移動時間（分）</p>', unsafe_allow_html=True)
-        # ▼変更：分離作戦を適用してバグを防ぎ、値を確実に記録する▼
         walk_to_dest_direct = st.number_input("", value=st.session_state.main_walk_time_direct, key="ui_walk_time_direct", step=1, label_visibility="collapsed")
         st.session_state.main_walk_time_direct = walk_to_dest_direct
         
         st.write("---")
         st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼移動前の準備（仕度）時間（分）</p>', unsafe_allow_html=True)
-        # ▼変更：分離作戦を適用してバグを防ぎ、値を確実に記録する▼
         prep_time = st.number_input("", value=st.session_state.main_prep_time_direct, step=1, key="ui_prep_time_direct", label_visibility="collapsed")
         st.session_state.main_prep_time_direct = prep_time
         

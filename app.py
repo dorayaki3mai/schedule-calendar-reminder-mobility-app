@@ -124,7 +124,13 @@ def save_all_data_to_cloud():
             "include_train_event": st.session_state.include_train_event,
             "include_buffer_event": st.session_state.include_buffer_event,
             "app_timezone": st.session_state.app_timezone,
-            "google_creds": st.session_state.get("google_creds", None)
+            "google_creds": st.session_state.get("google_creds", None),
+            # ▼追加：各種初期値をクラウド保存
+            "walk_time_train": st.session_state.walk_time_train,
+            "walk_time_direct": st.session_state.walk_time_direct,
+            "prep_time_train": st.session_state.prep_time_train,
+            "prep_time_direct": st.session_state.prep_time_direct,
+            "walk_to_dest": st.session_state.walk_to_dest
         }
         headers = {"Authorization": f"token {gist_token}", "Accept": "application/vnd.github.v3+json"}
         payload = {
@@ -150,9 +156,7 @@ def go_to_settings(): st.session_state.current_page = "settings"
 def go_to_settings_stations(): st.session_state.current_page = "settings_stations"
 def go_to_settings_presets(): st.session_state.current_page = "settings_presets"
 def go_to_settings_calendars(): st.session_state.current_page = "settings_calendars"
-
-if "walk_time_train" not in st.session_state: st.session_state.walk_time_train = 15
-if "walk_time_direct" not in st.session_state: st.session_state.walk_time_direct = 15
+def go_to_settings_defaults(): st.session_state.current_page = "settings_defaults" # 追加
 
 if "data_loaded" not in st.session_state:
     cloud_data = load_data_from_cloud()
@@ -170,6 +174,12 @@ if "data_loaded" not in st.session_state:
         st.session_state.include_buffer_event = cloud_data.get("include_buffer_event", True)
         st.session_state.app_timezone = cloud_data.get("app_timezone", "Asia/Tokyo")
         st.session_state.google_creds = cloud_data.get("google_creds", None)
+        # ▼追加：各種初期値をクラウドから復元（データが無ければ10分/30分を設定）
+        st.session_state.walk_time_train = cloud_data.get("walk_time_train", 10)
+        st.session_state.walk_time_direct = cloud_data.get("walk_time_direct", 10)
+        st.session_state.prep_time_train = cloud_data.get("prep_time_train", 30)
+        st.session_state.prep_time_direct = cloud_data.get("prep_time_direct", 30)
+        st.session_state.walk_to_dest = cloud_data.get("walk_to_dest", 10)
     else:
         st.session_state.walk_presets = [{"name": "井細田", "time": 5}, {"name": "足柄", "time": 15}, {"name": "小田原", "time": 28}]
         st.session_state.station_df = pd.DataFrame([{"順番": 1, "出発駅名": "井細田"}, {"順番": 2, "出発駅名": "足柄(神奈川県)"}, {"順番": 3, "出発駅名": "小田原"}])
@@ -179,6 +189,12 @@ if "data_loaded" not in st.session_state:
         st.session_state.include_train_event = True; st.session_state.include_buffer_event = True
         st.session_state.app_timezone = "Asia/Tokyo"
         st.session_state.google_creds = None
+        # ▼追加：初回アクセス時のデフォルト値
+        st.session_state.walk_time_train = 10
+        st.session_state.walk_time_direct = 10
+        st.session_state.prep_time_train = 30
+        st.session_state.prep_time_direct = 30
+        st.session_state.walk_to_dest = 10
     
     st.session_state.data_loaded = True
 
@@ -428,6 +444,8 @@ if st.session_state.current_page == "settings":
     st.button("📅 登録先カレンダーの管理  ＞", on_click=go_to_settings_calendars, use_container_width=True)
     st.button("🚉 出発駅リストの管理  ＞", on_click=go_to_settings_stations, use_container_width=True)
     st.button("🏠 移動時間ワンタッチボタンの管理  ＞", on_click=go_to_settings_presets, use_container_width=True)
+    # ▼追加：新しい設定画面へのボタン▼
+    st.button("⏱️ 各種初期値の管理  ＞", on_click=go_to_settings_defaults, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ------------------------------------------
@@ -612,6 +630,29 @@ elif st.session_state.current_page == "settings_presets":
     else:
         st.warning("登録できるワンタッチボタンは最大6件までです。")
 
+# ▼▼▼ 追加：A-5. 個別設定画面（各種初期値の管理） ▼▼▼
+# ------------------------------------------
+elif st.session_state.current_page == "settings_defaults":
+    st.button("◀️ 管理メニューに戻る", on_click=go_to_settings, type="secondary", use_container_width=True)
+    st.title("⏱️ 各種初期値の管理")
+    st.write("---")
+    st.caption("メイン画面で最初に入力されている各時間のデフォルト値を変更・保存できます。")
+
+    # 変更があったら即座にクラウドへ保存する関数
+    def update_defaults():
+        save_all_data_to_cloud()
+
+    st.subheader("🚶 移動時間")
+    st.number_input("現在地から【目的地】までの移動時間（分）", min_value=0, step=1, key="walk_time_direct", on_change=update_defaults)
+    st.number_input("現在地から【出発駅】までの移動時間（分）", min_value=0, step=1, key="walk_time_train", on_change=update_defaults)
+    st.number_input("【降車駅】から目的地までの移動時間（分）", min_value=0, step=1, key="walk_to_dest", on_change=update_defaults)
+
+    st.divider()
+    st.subheader("👜 準備時間")
+    st.number_input("出発前の準備・仕度の時間（分） ※電車利用時", min_value=0, step=1, key="prep_time_train", on_change=update_defaults)
+    st.number_input("出発前の準備・仕度の時間（分） ※徒歩・自転車時", min_value=0, step=1, key="prep_time_direct", on_change=update_defaults)
+# ▲▲▲ ここまで ▲▲▲
+
 # ------------------------------------------
 # B. メイン画面（スケジュール登録画面）
 # ------------------------------------------
@@ -782,7 +823,8 @@ elif st.session_state.current_page == "main":
             st.write("---")
             st.write(f"**🚉 降車する駅**: **{current_arrival_station if current_arrival_station else '（未入力）'}**")
             st.write("---")
-            walk_to_dest = st.number_input(f"**▼駅から目的地までの移動時間（分）**", value=5, step=1)
+            # ▼変更：初期値をセッションステート（10分）と連動させるために value=5 を削除し key を追加▼
+            walk_to_dest = st.number_input(f"**▼駅から目的地までの移動時間（分）**", key="walk_to_dest", step=1)
             train_deadline_dt = target_arrival_dt - timedelta(minutes=walk_to_dest)
             
             display_sta = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else "〇〇"
@@ -883,11 +925,12 @@ elif st.session_state.current_page == "main":
     st.write("---")
 
     if travel_mode == "🚃 電車を利用する":
-        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼現在地から【利用する出発駅】までの移動時間（分）</p>', unsafe_allow_html=True)
+        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼現在地から【出発駅】までの移動時間（分）</p>', unsafe_allow_html=True)
         walk_to_station = st.number_input("", key="walk_time_train", step=1, label_visibility="collapsed")
         st.write("---")
-        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼移動前の準備（仕度）時間（分）</p>', unsafe_allow_html=True)
-        prep_time = st.number_input("", value=15, step=1, key="prep_time_train", label_visibility="collapsed")
+        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼出発前の準備・仕度の時間（分）</p>', unsafe_allow_html=True)
+        # ▼変更：value=15 を削除し、セッションステート(初期値)と連動させる▼
+        prep_time = st.number_input("", step=1, key="prep_time_train", label_visibility="collapsed")
         leave_home_dt = datetime.combine(event_date, train_depart_time) - timedelta(minutes=walk_to_station)
         start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
         st.write("---")
@@ -912,8 +955,9 @@ elif st.session_state.current_page == "main":
         walk_to_dest_direct = st.number_input("", key="walk_time_direct", step=1, label_visibility="collapsed")
         
         st.write("---")
-        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼移動前の準備（仕度）時間（分）</p>', unsafe_allow_html=True)
-        prep_time = st.number_input("", value=15, step=1, key="prep_time_direct", label_visibility="collapsed")
+        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼出発前の準備・仕度の時間（分）</p>', unsafe_allow_html=True)
+        # ▼変更：value=15 を削除し、セッションステート(初期値)と連動させる▼
+        prep_time = st.number_input("", step=1, key="prep_time_direct", label_visibility="collapsed")
         leave_home_dt = target_arrival_dt - timedelta(minutes=walk_to_dest_direct)
         start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
         st.write("---")
@@ -971,7 +1015,6 @@ elif st.session_state.current_page == "main":
                 id_buffer = cal_options_ids[st.session_state.cal_sel_buffer] if st.session_state.cal_sel_buffer < len(cal_options_ids) else cal_options_ids[0]
                 id_main = cal_options_ids[st.session_state.cal_sel_main] if st.session_state.cal_sel_main < len(cal_options_ids) else cal_options_ids[0]
 
-                # ▼▼ ここから関数を改造しました ▼▼
                 def insert_event_with_duration(prefix, event_name, start_datetime, end_datetime, cal_id, location=""):
                     if start_datetime >= end_datetime:
                         end_datetime = start_datetime + timedelta(minutes=1)
@@ -979,17 +1022,13 @@ elif st.session_state.current_page == "main":
                     duration_minutes = int((end_datetime - start_datetime).total_seconds() / 60)
                     
                     if prefix:
-                        # プレフィックスがある場合は間に時間を挟む
                         final_title = f"{prefix}（{duration_minutes}分）{event_name}"
                     else:
-                        # 主要スケジュールなどは今まで通り末尾に時間をつける
                         final_title = f"{event_name}（{duration_minutes}分）"
 
                     service.events().insert(calendarId=cal_id, body={'summary': final_title, 'location': location, 'start': {'dateTime': start_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}, 'end': {'dateTime': end_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}}).execute()
                     sys_time.sleep(0.3)
-                # ▲▲ ここまで ▲▲
 
-                # ▼▼ 関数を呼び出す引数を、文字を分割して渡すように変更しました ▼▼
                 if travel_mode == "🚃 電車を利用する":
                     train_arrive_dt = datetime.combine(event_date, train_arrive_time)
                     if train_arrive_dt < datetime.combine(event_date, train_depart_time): train_arrive_dt += timedelta(days=1)
@@ -1017,7 +1056,6 @@ elif st.session_state.current_page == "main":
 
                     insert_event_with_duration("", event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
                     st.success("✅ 準備、移動、主要スケジュールを各カレンダーに登録しました！")
-                # ▲▲ ここまで ▲▲
 
             st.balloons()
             

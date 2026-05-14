@@ -124,7 +124,7 @@ def save_all_data_to_cloud():
             "include_train_event": st.session_state.include_train_event,
             "include_buffer_event": st.session_state.include_buffer_event,
             "app_timezone": st.session_state.app_timezone,
-            "google_creds": st.session_state.get("google_creds", None) # 追加: クラウドに認証情報を保存
+            "google_creds": st.session_state.get("google_creds", None)
         }
         headers = {"Authorization": f"token {gist_token}", "Accept": "application/vnd.github.v3+json"}
         payload = {
@@ -169,7 +169,7 @@ if "data_loaded" not in st.session_state:
         st.session_state.include_train_event = cloud_data.get("include_train_event", True)
         st.session_state.include_buffer_event = cloud_data.get("include_buffer_event", True)
         st.session_state.app_timezone = cloud_data.get("app_timezone", "Asia/Tokyo")
-        st.session_state.google_creds = cloud_data.get("google_creds", None) # 追加: クラウドから認証情報を復元
+        st.session_state.google_creds = cloud_data.get("google_creds", None)
     else:
         st.session_state.walk_presets = [{"name": "井細田", "time": 5}, {"name": "足柄", "time": 15}, {"name": "小田原", "time": 28}]
         st.session_state.station_df = pd.DataFrame([{"順番": 1, "出発駅名": "井細田"}, {"順番": 2, "出発駅名": "足柄(神奈川県)"}, {"順番": 3, "出発駅名": "小田原"}])
@@ -356,7 +356,6 @@ if st.session_state.current_page == "settings":
         if not st.session_state.force_logout:
             if st.session_state.google_creds is not None:
                 is_authenticated = True
-                # ▼変更: クラウド保存されていることがわかる文言に調整▼
                 auth_method = "☁️ このアプリに連携されています（クラウド保存済み）"
             elif "GOOGLE_TOKEN_JSON" in st.secrets:
                 is_authenticated = True
@@ -380,7 +379,7 @@ if st.session_state.current_page == "settings":
                     st.session_state.email_fetched = False
                     if "oauth_flow" in st.session_state: del st.session_state["oauth_flow"]
                     st.session_state.force_logout = True
-                    save_all_data_to_cloud() # 追加: 解除したことをクラウドにも反映
+                    save_all_data_to_cloud() 
                     st.rerun()
                 except Exception as e:
                     st.error(f"解除処理に失敗しました: {e}")
@@ -415,7 +414,7 @@ if st.session_state.current_page == "settings":
                             st.session_state.linked_email = "取得失敗"
 
                         st.session_state.force_logout = False
-                        save_all_data_to_cloud() # 追加: ログイン成功時にクラウドへ即時保存
+                        save_all_data_to_cloud() 
                         st.success("✅ 認証成功！メイン画面からカレンダーに登録できます。")
                         st.rerun()
                     except Exception as e:
@@ -972,43 +971,53 @@ elif st.session_state.current_page == "main":
                 id_buffer = cal_options_ids[st.session_state.cal_sel_buffer] if st.session_state.cal_sel_buffer < len(cal_options_ids) else cal_options_ids[0]
                 id_main = cal_options_ids[st.session_state.cal_sel_main] if st.session_state.cal_sel_main < len(cal_options_ids) else cal_options_ids[0]
 
-                def insert_event_with_duration(base_title, start_datetime, end_datetime, cal_id, location=""):
+                # ▼▼ ここから関数を改造しました ▼▼
+                def insert_event_with_duration(prefix, event_name, start_datetime, end_datetime, cal_id, location=""):
                     if start_datetime >= end_datetime:
                         end_datetime = start_datetime + timedelta(minutes=1)
                     
                     duration_minutes = int((end_datetime - start_datetime).total_seconds() / 60)
-                    final_title = f"{base_title} ({duration_minutes}分)"
+                    
+                    if prefix:
+                        # プレフィックスがある場合は間に時間を挟む
+                        final_title = f"{prefix}（{duration_minutes}分）{event_name}"
+                    else:
+                        # 主要スケジュールなどは今まで通り末尾に時間をつける
+                        final_title = f"{event_name}（{duration_minutes}分）"
 
                     service.events().insert(calendarId=cal_id, body={'summary': final_title, 'location': location, 'start': {'dateTime': start_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}, 'end': {'dateTime': end_datetime.isoformat(), 'timeZone': 'Asia/Tokyo'}}).execute()
                     sys_time.sleep(0.3)
+                # ▲▲ ここまで ▲▲
 
+                # ▼▼ 関数を呼び出す引数を、文字を分割して渡すように変更しました ▼▼
                 if travel_mode == "🚃 電車を利用する":
                     train_arrive_dt = datetime.combine(event_date, train_arrive_time)
                     if train_arrive_dt < datetime.combine(event_date, train_depart_time): train_arrive_dt += timedelta(days=1)
                     actual_arrive_dt = train_arrive_dt + timedelta(minutes=walk_to_dest)
                     clean_arrival_sta_for_cal = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else ""
 
-                    insert_event_with_duration(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt, id_prep)
-                    insert_event_with_duration(f"🚶 移動（自宅〜{depart_station}駅）：{event_title}", leave_home_dt, datetime.combine(event_date, train_depart_time), id_walk1)
+                    insert_event_with_duration("🏠 準備：", event_title, start_prep_dt, leave_home_dt, id_prep)
+                    insert_event_with_duration(f"🚶 移動（自宅〜{depart_station}駅）：", event_title, leave_home_dt, datetime.combine(event_date, train_depart_time), id_walk1)
                     if inc_train:
-                        insert_event_with_duration(f"🚃 電車（{depart_station}駅〜{clean_arrival_sta_for_cal}駅）：{event_title}", datetime.combine(event_date, train_depart_time), train_arrive_dt, id_train)
-                    insert_event_with_duration(f"🚶 移動（{clean_arrival_sta_for_cal}駅〜目的地）：{event_title}", train_arrive_dt, actual_arrive_dt, id_walk2)
+                        insert_event_with_duration(f"🚃 電車（{depart_station}駅〜{clean_arrival_sta_for_cal}駅）：", event_title, datetime.combine(event_date, train_depart_time), train_arrive_dt, id_train)
+                    insert_event_with_duration(f"🚶 移動（{clean_arrival_sta_for_cal}駅〜目的地）：", event_title, train_arrive_dt, actual_arrive_dt, id_walk2)
                     
                     if inc_buffer and (event_dt - actual_arrive_dt).total_seconds() > 60:
-                        insert_event_with_duration(f"⏳ 待機（バッファ）：{event_title}", actual_arrive_dt, event_dt, id_buffer, location=full_destination_target)
+                        insert_event_with_duration("⏳ 待機（バッファ）：", event_title, actual_arrive_dt, event_dt, id_buffer, location=full_destination_target)
                         
-                    insert_event_with_duration(event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
+                    insert_event_with_duration("", event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
                     st.success("✅ 準備から移動の詳細、主要スケジュールまでを各カレンダーに登録しました！")
 
                 else:
-                    insert_event_with_duration(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt, id_prep)
-                    insert_event_with_duration(f"🚶 移動（出発地〜目的地）：{event_title}", leave_home_dt, target_arrival_dt, id_walk1)
+                    insert_event_with_duration("🏠 準備：", event_title, start_prep_dt, leave_home_dt, id_prep)
+                    insert_event_with_duration("🚶 移動（出発地〜目的地）：", event_title, leave_home_dt, target_arrival_dt, id_walk1)
                     
                     if inc_buffer and (event_dt - target_arrival_dt).total_seconds() > 60:
-                        insert_event_with_duration(f"⏳ 待機（バッファ）：{event_title}", target_arrival_dt, event_dt, id_buffer, location=full_destination_target)
+                        insert_event_with_duration("⏳ 待機（バッファ）：", event_title, target_arrival_dt, event_dt, id_buffer, location=full_destination_target)
 
-                    insert_event_with_duration(event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
+                    insert_event_with_duration("", event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
                     st.success("✅ 準備、移動、主要スケジュールを各カレンダーに登録しました！")
+                # ▲▲ ここまで ▲▲
 
             st.balloons()
             

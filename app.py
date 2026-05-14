@@ -150,8 +150,8 @@ def go_to_settings_stations(): st.session_state.current_page = "settings_station
 def go_to_settings_presets(): st.session_state.current_page = "settings_presets"
 def go_to_settings_calendars(): st.session_state.current_page = "settings_calendars"
 
-if "walk_time_train" not in st.session_state: st.session_state.walk_time_train = 15
-if "walk_time_direct" not in st.session_state: st.session_state.walk_time_direct = 15
+if "walk_time_train" not in st.session_state: st.session_state.walk_time_train = 10
+if "walk_time_direct" not in st.session_state: st.session_state.walk_time_direct = 10
 
 if "data_loaded" not in st.session_state:
     cloud_data = load_data_from_cloud()
@@ -734,7 +734,7 @@ elif st.session_state.current_page == "main":
     buffer_minutes = st.number_input("到着バッファ（分）", value=30, min_value=0, step=1) if arrival_buffer_option == "自由入力（分）" else int(re.search(r'\d+', arrival_buffer_option).group())
     event_dt = datetime.combine(event_date, start_time)
     target_arrival_dt = event_dt - timedelta(minutes=buffer_minutes)
-    st.info(f"**💡 目標到着時刻: {target_arrival_dt.strftime('%H:%M')}**")
+    st.info(f"**💡 目的地到着時刻: {target_arrival_dt.strftime('%H:%M')}**")
 
     # ==========================================
     # 移動モードの選択
@@ -777,7 +777,7 @@ elif st.session_state.current_page == "main":
             st.write("---")
             st.write(f"**🚉 降車する駅**: **{current_arrival_station if current_arrival_station else '（未入力）'}**")
             st.write("---")
-            walk_to_dest = st.number_input(f"**▼駅から目的地までの移動時間（分）**", value=5, step=1)
+            walk_to_dest = st.number_input(f"**▼駅から目的地までの移動時間（分）**", value=7, step=1)
             train_deadline_dt = target_arrival_dt - timedelta(minutes=walk_to_dest)
             
             display_sta = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else "〇〇"
@@ -826,7 +826,7 @@ elif st.session_state.current_page == "main":
             st.write("---")
             st.write("▼ ジョルダン乗換案内でルートを検索")
             st.link_button("↗️ ジョルダン乗換案内を開く", "https://www.jorudan.co.jp/norikae/cgi/nori.cgi?" + urllib.parse.urlencode(jorudan_params), use_container_width=True, type="primary") 
-            
+            st.caption("ジョルダン乗換案内の検索結果から乗換の詳細メモをGoogleカレンダーへと登録できます。")    
             st.write("---")
             st.write("▼ 調べた電車の時刻を入力してください")
 
@@ -878,11 +878,11 @@ elif st.session_state.current_page == "main":
     st.write("---")
 
     if travel_mode == "🚃 電車を利用する":
-        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼現在地から【利用する出発駅】までの移動時間（分）</p>', unsafe_allow_html=True)
-        walk_to_station = st.number_input("", key="walk_time_train", step=1, label_visibility="collapsed")
+        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼現在地から【出発駅】までの移動時間（分）</p>', unsafe_allow_html=True)
+        walk_to_station = st.number_input("", value=10, key="walk_time_train", step=1, label_visibility="collapsed")
         st.write("---")
-        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼移動前の準備（仕度）時間（分）</p>', unsafe_allow_html=True)
-        prep_time = st.number_input("", value=15, step=1, key="prep_time_train", label_visibility="collapsed")
+        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼移動前の準備・仕度の時間（分）</p>', unsafe_allow_html=True)
+        prep_time = st.number_input("", value=30, step=1, key="prep_time_train", label_visibility="collapsed")
         leave_home_dt = datetime.combine(event_date, train_depart_time) - timedelta(minutes=walk_to_station)
         start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
         st.write("---")
@@ -903,17 +903,18 @@ elif st.session_state.current_page == "main":
                 st.link_button("🚶‍♂️ 現在地から目的地までの移動ルートを確認", f"https://www.google.com/maps/dir/?api=1&destination={urllib.parse.quote(search_destination)}&travelmode=walking", use_container_width=True)
             else: st.warning("**目的地が入力されていません。**")
             
-        walk_to_dest_direct = st.number_input("**▼現在地から【目的地】までの移動時間（分）**", key="walk_time_direct", step=1)
+        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼現在地から【目的地】までの移動時間（分）</p>', unsafe_allow_html=True)
+        walk_to_dest_direct = st.number_input("", key="walk_time_direct", step=1, label_visibility="collapsed")
         st.write("---")
-        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼移動前の準備（仕度）時間（分）</p>', unsafe_allow_html=True)
-        prep_time = st.number_input("", value=15, step=1, key="prep_time_direct", label_visibility="collapsed")
+        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼移動前の準備・仕度の時間（分）</p>', unsafe_allow_html=True)
+        prep_time = st.number_input("", value=30, step=1, key="prep_time_direct", label_visibility="collapsed")
         leave_home_dt = target_arrival_dt - timedelta(minutes=walk_to_dest_direct)
         start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
         st.write("---")
 
-    st.info(f"💡 **目標到着時刻: {target_arrival_dt.strftime('%H:%M')}**")
-    st.error(f"👜 **準備開始時刻: {start_prep_dt.strftime('%H:%M')}**")
-    st.warning(f"🚶 **出発時刻: {leave_home_dt.strftime('%H:%M')}**")
+    st.info(f"💡 **目的地到着時刻: {target_arrival_dt.strftime('%H:%M')}**")
+    st.warning(f"👜 **準備開始時刻: {start_prep_dt.strftime('%H:%M')}**")
+    st.error(f"🚶 **出発時刻: {leave_home_dt.strftime('%H:%M')}**")
 
     st.write("---")
     # ==========================================
@@ -1017,7 +1018,6 @@ elif st.session_state.current_page == "main":
     st.link_button(btn_label_step5, cal_target_url, use_container_width=True)
 
     st.write("---")
-    st.write("▼ 登録オプション")
     if travel_mode == "🚃 電車を利用する":
         st.caption("電車の乗車時間をカレンダーに登録したくない場合はOFFにしてください。")
         st.toggle("**🚃 電車の乗車時間を登録する**", key="include_train_event_widget", value=st.session_state.include_train_event, on_change=update_toggle_state, args=("include_train_event",))

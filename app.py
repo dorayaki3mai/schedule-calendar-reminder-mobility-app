@@ -878,9 +878,11 @@ elif st.session_state.current_page == "main":
     st.write("---")
 
     if travel_mode == "🚃 電車を利用する":
-        walk_to_station = st.number_input("**▼現在地から【利用する出発駅】までの移動時間（分）**", key="walk_time_train", step=1)
+        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼現在地から【利用する出発駅】までの移動時間（分）</p>', unsafe_allow_html=True)
+        walk_to_station = st.number_input("", key="walk_time_train", step=1, label_visibility="collapsed")
         st.write("---")
-        prep_time = st.number_input("**▼移動前の準備（仕度）時間（分）**", value=15, step=1, key="prep_time_train")
+        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼移動前の準備（仕度）時間（分）</p>', unsafe_allow_html=True)
+        prep_time = st.number_input("", value=15, step=1, key="prep_time_train", label_visibility="collapsed")
         leave_home_dt = datetime.combine(event_date, train_depart_time) - timedelta(minutes=walk_to_station)
         start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
         st.write("---")
@@ -903,7 +905,8 @@ elif st.session_state.current_page == "main":
             
         walk_to_dest_direct = st.number_input("**▼現在地から【目的地】までの移動時間（分）**", key="walk_time_direct", step=1)
         st.write("---")
-        prep_time = st.number_input("**▼移動前の準備（仕度）時間（分）**", value=15, step=1, key="prep_time_direct")
+        st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼移動前の準備（仕度）時間（分）</p>', unsafe_allow_html=True)
+        prep_time = st.number_input("", value=15, step=1, key="prep_time_direct", label_visibility="collapsed")
         leave_home_dt = target_arrival_dt - timedelta(minutes=walk_to_dest_direct)
         start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
         st.write("---")
@@ -920,6 +923,12 @@ elif st.session_state.current_page == "main":
 
     cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
     if not cal_options_display: cal_options_display = ["主要スケジュール"]
+
+    # ▼ ここに「主要スケジュールの登録先カレンダー」を移動しました ▼
+    st.write("**▼ 主要スケジュールの登録先カレンダー**")
+    st.selectbox("🎯 主要スケジュール", cal_options_display, index=get_safe_cal_idx("cal_sel_main", cal_options_display), key="cal_sel_main_widget_main", on_change=update_cal_sel, args=("cal_sel_main", "cal_sel_main_widget_main"), label_visibility="collapsed")
+    st.write("") # ボタンとの間に少し余白
+    # ▲ ここまで ▲
 
     if st.button("📅 カレンダーに登録", type="primary", use_container_width=True):
         try:
@@ -1017,9 +1026,8 @@ elif st.session_state.current_page == "main":
     st.toggle("**⏳ 待機時間・目的地までの移動のバッファを登録する**", key="include_buffer_event_widget", value=st.session_state.include_buffer_event, on_change=update_toggle_state, args=("include_buffer_event",))
 
     st.write("---")
-    st.write("**▼ 主要スケジュールの登録先カレンダー**")
-    st.selectbox("🎯 主要スケジュール", cal_options_display, index=get_safe_cal_idx("cal_sel_main", cal_options_display), key="cal_sel_main_widget_main", on_change=update_cal_sel, args=("cal_sel_main", "cal_sel_main_widget_main"), label_visibility="collapsed")
-
+    
+    # 新しいカレンダーを追加のエクスパンダーは「登録オプション」の下に残しました
     with st.expander("➕ 新しいカレンダーを追加", expanded=False):
         st.caption("💡 新しいカレンダーを追加します。（リストの確認・削除や一括インポートは右上の「⚙️ 設定」メニューから）")
         c1, c2 = st.columns([1, 1])

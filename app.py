@@ -39,26 +39,65 @@ div[data-baseweb="input"] input {
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 【新機能】GitHub Gistを利用したクラウドデータの同期関数
+# 【バグ修正】見えない改行コードを完全除去する安全な読み込み関数
+# ==========================================
+def get_clean_secret(key):
+    """Secretsから値を読み込み、改行や余計な空白を強制的に完全に削除する"""
+    if key in st.secrets:
+        # \n (改行) や \r (キャリッジリターン) を完全に空文字に置き換え、前後の空白も削る
+        return st.secrets[key].replace("\n", "").replace("\r", "").strip()
+    return None
+
+# ==========================================
+# プライベートロック画面（セキュリティ強化）
+# ==========================================
+app_password = get_clean_secret("APP_PASSWORD")
+
+if app_password:
+    if "is_unlocked" not in st.session_state:
+        st.session_state.is_unlocked = False
+
+    if not st.session_state.is_unlocked:
+        st.title("🔒 プライベートツール")
+        st.write("このアプリはアクセス制限されています。パスコードを入力してください。")
+        
+        pwd_input = st.text_input("パスコード", type="password", key="login_pwd")
+        if st.button("🔓 ロック解除", type="primary", use_container_width=True):
+            if pwd_input == app_password:
+                st.session_state.is_unlocked = True
+                st.rerun() 
+            else:
+                st.error("❌ パスコードが間違っています。")
+        st.stop() 
+
+# ==========================================
+# GitHub Gistを利用したクラウドデータの同期関数
 # ==========================================
 def load_data_from_cloud():
-    if "GIST_ID" in st.secrets and "GIST_TOKEN" in st.secrets:
-        headers = {"Authorization": f"token {st.secrets['GIST_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
+    gist_id = get_clean_secret("GIST_ID")
+    gist_token = get_clean_secret("GIST_TOKEN")
+    
+    if gist_id and gist_token:
+        headers = {"Authorization": f"token {gist_token}", "Accept": "application/vnd.github.v3+json"}
         try:
-            response = requests.get(f"https://api.github.com/gists/{st.secrets['GIST_ID']}", headers=headers)
+            response = requests.get(f"https://api.github.com/gists/{gist_id}", headers=headers)
             if response.status_code == 200:
                 gist_data = response.json()
                 file_content = gist_data['files']['router_data.json']['content']
                 if file_content.strip() == "{}" or file_content.strip() == "":
                     return None
                 return json.loads(file_content)
+            else:
+                st.error(f"クラウドDBの読み込みに失敗しました (Status Code: {response.status_code})")
         except Exception as e:
             st.error(f"クラウドからのデータ読み込みに失敗しました: {e}")
     return None
 
 def save_all_data_to_cloud():
-    if "GIST_ID" in st.secrets and "GIST_TOKEN" in st.secrets:
-        # 保存するデータを一つにまとめる
+    gist_id = get_clean_secret("GIST_ID")
+    gist_token = get_clean_secret("GIST_TOKEN")
+    
+    if gist_id and gist_token:
         data_to_save = {
             "station_df": st.session_state.station_df.to_dict('records'),
             "calendar_df": st.session_state.calendar_df.to_dict('records'),
@@ -73,7 +112,7 @@ def save_all_data_to_cloud():
             "include_buffer_event": st.session_state.include_buffer_event,
             "app_timezone": st.session_state.app_timezone
         }
-        headers = {"Authorization": f"token {st.secrets['GIST_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
+        headers = {"Authorization": f"token {gist_token}", "Accept": "application/vnd.github.v3+json"}
         payload = {
             "files": {
                 "router_data.json": {
@@ -82,7 +121,7 @@ def save_all_data_to_cloud():
             }
         }
         try:
-            requests.patch(f"https://api.github.com/gists/{st.secrets['GIST_ID']}", headers=headers, json=payload)
+            requests.patch(f"https://api.github.com/gists/{gist_id}", headers=headers, json=payload)
         except Exception as e:
             st.error(f"クラウドへのデータ保存に失敗しました: {e}")
 
@@ -101,11 +140,9 @@ def go_to_settings_calendars(): st.session_state.current_page = "settings_calend
 if "walk_time_train" not in st.session_state: st.session_state.walk_time_train = 15
 if "walk_time_direct" not in st.session_state: st.session_state.walk_time_direct = 15
 
-# --- クラウドからの初期データロード ---
 if "data_loaded" not in st.session_state:
     cloud_data = load_data_from_cloud()
     if cloud_data:
-        # クラウドのデータでセッションを復元
         st.session_state.station_df = pd.DataFrame(cloud_data.get("station_df", []))
         st.session_state.calendar_df = pd.DataFrame(cloud_data.get("calendar_df", []))
         st.session_state.walk_presets = cloud_data.get("walk_presets", [])
@@ -119,7 +156,6 @@ if "data_loaded" not in st.session_state:
         st.session_state.include_buffer_event = cloud_data.get("include_buffer_event", True)
         st.session_state.app_timezone = cloud_data.get("app_timezone", "Asia/Tokyo")
     else:
-        # クラウドにデータが無い場合の初期設定
         st.session_state.walk_presets = [{"name": "井細田", "time": 5}, {"name": "足柄", "time": 15}, {"name": "小田原", "time": 28}]
         st.session_state.station_df = pd.DataFrame([{"順番": 1, "出発駅名": "井細田"}, {"順番": 2, "出発駅名": "足柄(神奈川県)"}, {"順番": 3, "出発駅名": "小田原"}])
         st.session_state.calendar_df = pd.DataFrame([{"順番": 1, "カレンダー名": "メインカレンダー", "カレンダーID": "primary"}])
@@ -130,7 +166,6 @@ if "data_loaded" not in st.session_state:
     
     st.session_state.data_loaded = True
 
-# ローカルな履歴や一時的な認証情報は初期化
 if "station_history" not in st.session_state: st.session_state.station_history = []
 if "calendar_history" not in st.session_state: st.session_state.calendar_history = []
 if "google_creds" not in st.session_state: st.session_state.google_creds = None
@@ -150,7 +185,8 @@ if not st.session_state.email_fetched and not st.session_state.force_logout:
         if st.session_state.google_creds is not None:
             creds = Credentials.from_authorized_user_info(json.loads(st.session_state.google_creds), SCOPES)
         elif "GOOGLE_TOKEN_JSON" in st.secrets:
-            creds = Credentials.from_authorized_user_info(json.loads(st.secrets["GOOGLE_TOKEN_JSON"]), SCOPES)
+            # こちらも念のため、余計な文字列操作の前に安全に読み込む
+            creds = Credentials.from_authorized_user_info(json.loads(st.secrets["GOOGLE_TOKEN_JSON"].strip()), SCOPES)
         elif os.path.exists('token.json'):
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
             
@@ -184,7 +220,6 @@ def save_to_history():
     if len(st.session_state.station_history) > 5:
         st.session_state.station_history = st.session_state.station_history[:5]
 
-# 設定が変更された際にクラウドにも保存するコールバック
 def update_cal_sel(state_key, widget_key):
     selected_val = st.session_state[widget_key]
     cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
@@ -870,7 +905,9 @@ elif st.session_state.current_page == "main":
                     if st.session_state.google_creds is not None:
                         creds = Credentials.from_authorized_user_info(json.loads(st.session_state.google_creds), SCOPES)
                     elif "GOOGLE_TOKEN_JSON" in st.secrets:
-                        creds = Credentials.from_authorized_user_info(json.loads(st.secrets["GOOGLE_TOKEN_JSON"]), SCOPES)
+                        # 念のため、JSON文字列もクリーンにしてからロードする
+                        clean_json_str = st.secrets["GOOGLE_TOKEN_JSON"].strip()
+                        creds = Credentials.from_authorized_user_info(json.loads(clean_json_str), SCOPES)
                     elif os.path.exists('token.json'):
                         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
                 

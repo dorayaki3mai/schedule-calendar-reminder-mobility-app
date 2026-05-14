@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, time
 import urllib.parse
 import os.path
 import os
+import requests # メール・クラウドDB通信用
 # タイムゾーン操作用
 import pytz
 import time as sys_time
@@ -16,7 +17,6 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-import requests # メールアドレス取得用
 # --- GPS取得用のライブラリ ---
 from streamlit_js_eval import streamlit_js_eval
 
@@ -39,7 +39,55 @@ div[data-baseweb="input"] input {
 """, unsafe_allow_html=True)
 
 # ==========================================
-# データ管理系の初期化
+# 【新機能】GitHub Gistを利用したクラウドデータの同期関数
+# ==========================================
+def load_data_from_cloud():
+    if "GIST_ID" in st.secrets and "GIST_TOKEN" in st.secrets:
+        headers = {"Authorization": f"token {st.secrets['GIST_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
+        try:
+            response = requests.get(f"https://api.github.com/gists/{st.secrets['GIST_ID']}", headers=headers)
+            if response.status_code == 200:
+                gist_data = response.json()
+                file_content = gist_data['files']['router_data.json']['content']
+                if file_content.strip() == "{}" or file_content.strip() == "":
+                    return None
+                return json.loads(file_content)
+        except Exception as e:
+            st.error(f"クラウドからのデータ読み込みに失敗しました: {e}")
+    return None
+
+def save_all_data_to_cloud():
+    if "GIST_ID" in st.secrets and "GIST_TOKEN" in st.secrets:
+        # 保存するデータを一つにまとめる
+        data_to_save = {
+            "station_df": st.session_state.station_df.to_dict('records'),
+            "calendar_df": st.session_state.calendar_df.to_dict('records'),
+            "walk_presets": st.session_state.walk_presets,
+            "cal_sel_prep": st.session_state.cal_sel_prep,
+            "cal_sel_walk1": st.session_state.cal_sel_walk1,
+            "cal_sel_train": st.session_state.cal_sel_train,
+            "cal_sel_walk2": st.session_state.cal_sel_walk2,
+            "cal_sel_buffer": st.session_state.cal_sel_buffer,
+            "cal_sel_main": st.session_state.cal_sel_main,
+            "include_train_event": st.session_state.include_train_event,
+            "include_buffer_event": st.session_state.include_buffer_event,
+            "app_timezone": st.session_state.app_timezone
+        }
+        headers = {"Authorization": f"token {st.secrets['GIST_TOKEN']}", "Accept": "application/vnd.github.v3+json"}
+        payload = {
+            "files": {
+                "router_data.json": {
+                    "content": json.dumps(data_to_save, ensure_ascii=False, indent=2)
+                }
+            }
+        }
+        try:
+            requests.patch(f"https://api.github.com/gists/{st.secrets['GIST_ID']}", headers=headers, json=payload)
+        except Exception as e:
+            st.error(f"クラウドへのデータ保存に失敗しました: {e}")
+
+# ==========================================
+# データ管理系の初期化（クラウドからの読み込み込み）
 # ==========================================
 
 if "current_page" not in st.session_state: st.session_state.current_page = "main"
@@ -53,50 +101,45 @@ def go_to_settings_calendars(): st.session_state.current_page = "settings_calend
 if "walk_time_train" not in st.session_state: st.session_state.walk_time_train = 15
 if "walk_time_direct" not in st.session_state: st.session_state.walk_time_direct = 15
 
-if "walk_presets" not in st.session_state:
-    st.session_state.walk_presets = [{"name": "井細田", "time": 5}, {"name": "足柄", "time": 15}, {"name": "小田原", "time": 28}]
+# --- クラウドからの初期データロード ---
+if "data_loaded" not in st.session_state:
+    cloud_data = load_data_from_cloud()
+    if cloud_data:
+        # クラウドのデータでセッションを復元
+        st.session_state.station_df = pd.DataFrame(cloud_data.get("station_df", []))
+        st.session_state.calendar_df = pd.DataFrame(cloud_data.get("calendar_df", []))
+        st.session_state.walk_presets = cloud_data.get("walk_presets", [])
+        st.session_state.cal_sel_prep = cloud_data.get("cal_sel_prep", 0)
+        st.session_state.cal_sel_walk1 = cloud_data.get("cal_sel_walk1", 0)
+        st.session_state.cal_sel_train = cloud_data.get("cal_sel_train", 0)
+        st.session_state.cal_sel_walk2 = cloud_data.get("cal_sel_walk2", 0)
+        st.session_state.cal_sel_buffer = cloud_data.get("cal_sel_buffer", 0)
+        st.session_state.cal_sel_main = cloud_data.get("cal_sel_main", 0)
+        st.session_state.include_train_event = cloud_data.get("include_train_event", True)
+        st.session_state.include_buffer_event = cloud_data.get("include_buffer_event", True)
+        st.session_state.app_timezone = cloud_data.get("app_timezone", "Asia/Tokyo")
+    else:
+        # クラウドにデータが無い場合の初期設定
+        st.session_state.walk_presets = [{"name": "井細田", "time": 5}, {"name": "足柄", "time": 15}, {"name": "小田原", "time": 28}]
+        st.session_state.station_df = pd.DataFrame([{"順番": 1, "出発駅名": "井細田"}, {"順番": 2, "出発駅名": "足柄(神奈川県)"}, {"順番": 3, "出発駅名": "小田原"}])
+        st.session_state.calendar_df = pd.DataFrame([{"順番": 1, "カレンダー名": "メインカレンダー", "カレンダーID": "primary"}])
+        st.session_state.cal_sel_prep = 0; st.session_state.cal_sel_walk1 = 0; st.session_state.cal_sel_train = 0
+        st.session_state.cal_sel_walk2 = 0; st.session_state.cal_sel_buffer = 0; st.session_state.cal_sel_main = 0
+        st.session_state.include_train_event = True; st.session_state.include_buffer_event = True
+        st.session_state.app_timezone = "Asia/Tokyo"
+    
+    st.session_state.data_loaded = True
 
+# ローカルな履歴や一時的な認証情報は初期化
 if "station_history" not in st.session_state: st.session_state.station_history = []
-if "station_df" not in st.session_state:
-    st.session_state.station_df = pd.DataFrame([
-        {"順番": 1, "出発駅名": "井細田"},
-        {"順番": 2, "出発駅名": "足柄(神奈川県)"},
-        {"順番": 3, "出発駅名": "小田原"}
-    ])
-
-if "app_timezone" not in st.session_state: st.session_state.app_timezone = "Asia/Tokyo"
-app_tz = pytz.timezone(st.session_state.app_timezone)
-now_with_tz = datetime.now(app_tz)
-
-def save_to_history():
-    snapshot = st.session_state.station_df.copy()
-    timestamp = datetime.now(app_tz).strftime("%Y/%m/%d %H:%M:%S")
-    st.session_state.station_history.insert(0, {"time": timestamp, "data": snapshot})
-    if len(st.session_state.station_history) > 5:
-        st.session_state.station_history = st.session_state.station_history[:5]
-
 if "calendar_history" not in st.session_state: st.session_state.calendar_history = []
-if "calendar_df" not in st.session_state:
-    st.session_state.calendar_df = pd.DataFrame([
-        {"順番": 1, "カレンダー名": "メインカレンダー", "カレンダーID": "primary"}
-    ])
-
-if "cal_sel_prep" not in st.session_state: st.session_state.cal_sel_prep = 0
-if "cal_sel_walk1" not in st.session_state: st.session_state.cal_sel_walk1 = 0
-if "cal_sel_train" not in st.session_state: st.session_state.cal_sel_train = 0
-if "cal_sel_walk2" not in st.session_state: st.session_state.cal_sel_walk2 = 0
-if "cal_sel_buffer" not in st.session_state: st.session_state.cal_sel_buffer = 0
-if "cal_sel_main" not in st.session_state: st.session_state.cal_sel_main = 0
-
-if "include_train_event" not in st.session_state: st.session_state.include_train_event = True
-if "include_buffer_event" not in st.session_state: st.session_state.include_buffer_event = True
-
 if "google_creds" not in st.session_state: st.session_state.google_creds = None
 if "force_logout" not in st.session_state: st.session_state.force_logout = False
 if "linked_email" not in st.session_state: st.session_state.linked_email = ""
 
+app_tz = pytz.timezone(st.session_state.app_timezone)
+now_with_tz = datetime.now(app_tz)
 
-# --- 【バグ修正】既存の連携アカウントのメールアドレスを起動時に取得する ---
 if "email_fetched" not in st.session_state:
     st.session_state.email_fetched = False
 
@@ -112,17 +155,18 @@ if not st.session_state.email_fetched and not st.session_state.force_logout:
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
             
         if creds:
-            # 期限切れならリフレッシュして最新のトークンにする
             if creds.expired and creds.refresh_token:
                 creds.refresh(Request())
-            # 有効な鍵であればGoogleにアドレスを問い合わせる
             if creds.valid:
-                user_info_response = requests.get('https://www.googleapis.com/oauth2/v1/userinfo', headers={'Authorization': f'Bearer {creds.token}'})
-                st.session_state.linked_email = user_info_response.json().get('email', '')
+                user_info_response = requests.get('https://www.googleapis.com/oauth2/v1/userinfo?alt=json', headers={'Authorization': f'Bearer {creds.token}'})
+                if user_info_response.status_code == 200:
+                    st.session_state.linked_email = user_info_response.json().get('email', '')
+                else:
+                    st.session_state.linked_email = "※要・再連携"
         
         st.session_state.email_fetched = True
     except Exception as e:
-        # エラーが起きてもフラグを立て、画面がリロードされるたびに重くなるのを防ぐ
+        st.session_state.linked_email = "※要・再連携"
         st.session_state.email_fetched = True
 
 
@@ -133,12 +177,25 @@ def save_cal_to_history():
     if len(st.session_state.calendar_history) > 5:
         st.session_state.calendar_history = st.session_state.calendar_history[:5]
 
+def save_to_history():
+    snapshot = st.session_state.station_df.copy()
+    timestamp = datetime.now(app_tz).strftime("%Y/%m/%d %H:%M:%S")
+    st.session_state.station_history.insert(0, {"time": timestamp, "data": snapshot})
+    if len(st.session_state.station_history) > 5:
+        st.session_state.station_history = st.session_state.station_history[:5]
+
+# 設定が変更された際にクラウドにも保存するコールバック
 def update_cal_sel(state_key, widget_key):
     selected_val = st.session_state[widget_key]
     cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
     if not cal_options_display: cal_options_display = ["メインカレンダー"]
     try: st.session_state[state_key] = cal_options_display.index(selected_val)
     except ValueError: st.session_state[state_key] = 0
+    save_all_data_to_cloud()
+
+def update_toggle_state(state_key):
+    st.session_state[state_key] = st.session_state[f"{state_key}_widget"]
+    save_all_data_to_cloud()
 
 def get_safe_cal_idx(state_key, options_list):
     idx = st.session_state.get(state_key, 0)
@@ -158,6 +215,7 @@ def add_new_calendar_callback():
         st.session_state.calendar_df = pd.concat([st.session_state.calendar_df, new_row], ignore_index=True)
         st.session_state.new_cal_name_input = ""
         st.session_state.new_cal_id_input = ""
+        save_all_data_to_cloud()
 
 def add_new_calendar_sb_callback():
     name = st.session_state.new_cal_name_input_sb.strip()
@@ -169,6 +227,7 @@ def add_new_calendar_sb_callback():
         st.session_state.calendar_df = pd.concat([st.session_state.calendar_df, new_row], ignore_index=True)
         st.session_state.new_cal_name_input_sb = ""
         st.session_state.new_cal_id_input_sb = ""
+        save_all_data_to_cloud()
 
 def add_new_station_callback():
     name = st.session_state.new_station_input.strip()
@@ -178,6 +237,7 @@ def add_new_station_callback():
         new_row = pd.DataFrame([{"順番": new_order, "出発駅名": name}])
         st.session_state.station_df = pd.concat([st.session_state.station_df, new_row], ignore_index=True)
         st.session_state.new_station_input = ""
+        save_all_data_to_cloud()
 
 def add_new_station_sb_callback():
     name = st.session_state.new_station_input_sb.strip()
@@ -187,6 +247,7 @@ def add_new_station_sb_callback():
         new_row = pd.DataFrame([{"順番": new_order, "出発駅名": name}])
         st.session_state.station_df = pd.concat([st.session_state.station_df, new_row], ignore_index=True)
         st.session_state.new_station_input_sb = ""
+        save_all_data_to_cloud()
 
 def add_new_preset_callback():
     name = st.session_state.new_p_name_input.strip()
@@ -195,6 +256,7 @@ def add_new_preset_callback():
         st.session_state.walk_presets.append({"name": name, "time": mins})
         st.session_state.new_p_name_input = ""
         st.session_state.new_p_time_input = 10
+        save_all_data_to_cloud()
 
 def add_new_preset_sb_callback():
     name = st.session_state.new_p_name_input_sb.strip()
@@ -203,10 +265,13 @@ def add_new_preset_sb_callback():
         st.session_state.walk_presets.append({"name": name, "time": mins})
         st.session_state.new_p_name_input_sb = ""
         st.session_state.new_p_time_input_sb = 10
+        save_all_data_to_cloud()
 
 def set_depart_station_callback(sta): st.session_state.selected_depart_station = sta
 def update_depart_station_from_sb(): st.session_state.selected_depart_station = st.session_state.sb_depart_station
-def update_timezone(): st.session_state.app_timezone = st.session_state.tz_selector
+def update_timezone(): 
+    st.session_state.app_timezone = st.session_state.tz_selector
+    save_all_data_to_cloud()
 
 
 # ==========================================
@@ -226,7 +291,7 @@ if st.session_state.current_page == "settings":
         current_tz_index = tz_options.index(st.session_state.app_timezone) if st.session_state.app_timezone in tz_options else 0
         st.selectbox("基準タイムゾーン", tz_options, index=current_tz_index, key="tz_selector", on_change=update_timezone)
 
-    with st.expander("👤 カレンダーアカウント連携", expanded=False):
+    with st.expander("👤 カレンダーアカウント連携", expanded=True if st.session_state.linked_email == "※要・再連携" else False):
         st.caption("連携しているGoogleアカウントの接続解除・切り替えを行います。")
         SCOPES = [
             'https://www.googleapis.com/auth/calendar',
@@ -249,14 +314,18 @@ if st.session_state.current_page == "settings":
                 auth_method = "💻 ローカルファイルで連携されています（開発用）"
 
         if is_authenticated:
-            email_info = f"\n📧 連携中: **{st.session_state.linked_email}**" if st.session_state.linked_email else ""
-            st.success(f"✅ 現在のアカウントは連携済みです\n\n({auth_method}){email_info}")
-            if st.button("🗑️ アカウント連携を解除する", use_container_width=True):
+            if st.session_state.linked_email == "※要・再連携":
+                st.error("⚠️ 権限が古いためメールアドレスが取得できません。\n一度「連携を解除」して、再度ログインし直してください。")
+            else:
+                email_info = f"\n📧 連携中: **{st.session_state.linked_email}**" if st.session_state.linked_email else ""
+                st.success(f"✅ 現在のアカウントは連携済みです\n\n({auth_method}){email_info}")
+                
+            if st.button("🗑️ アカウント連携を解除する", use_container_width=True, type="primary" if st.session_state.linked_email == "※要・再連携" else "secondary"):
                 try:
                     if os.path.exists('token.json'): os.remove('token.json')
                     st.session_state.google_creds = None
                     st.session_state.linked_email = ""
-                    st.session_state.email_fetched = False # 解除時にフラグもリセット
+                    st.session_state.email_fetched = False
                     if "oauth_flow" in st.session_state: del st.session_state["oauth_flow"]
                     st.session_state.force_logout = True
                     st.rerun()
@@ -283,8 +352,11 @@ if st.session_state.current_page == "settings":
                         with open('token.json', 'w') as token: token.write(creds.to_json())
                         
                         try:
-                            user_info_response = requests.get('https://www.googleapis.com/oauth2/v1/userinfo', headers={'Authorization': f'Bearer {creds.token}'})
-                            st.session_state.linked_email = user_info_response.json().get('email', '')
+                            user_info_response = requests.get('https://www.googleapis.com/oauth2/v1/userinfo?alt=json', headers={'Authorization': f'Bearer {creds.token}'})
+                            if user_info_response.status_code == 200:
+                                st.session_state.linked_email = user_info_response.json().get('email', '')
+                            else:
+                                st.session_state.linked_email = "※要・再連携"
                             st.session_state.email_fetched = True
                         except:
                             st.session_state.linked_email = "取得失敗"
@@ -321,6 +393,7 @@ elif st.session_state.current_page == "settings_calendars":
                     save_cal_to_history()
                     st.session_state.calendar_df = st.session_state.calendar_df.drop(idx).reset_index(drop=True)
                     st.session_state.calendar_df["順番"] = range(1, len(st.session_state.calendar_df) + 1)
+                    save_all_data_to_cloud()
                     st.rerun()
                     
     st.divider()
@@ -338,6 +411,7 @@ elif st.session_state.current_page == "settings_calendars":
             with col_res:
                 if st.button("⏪ 復元", key=f"hist_res_cal_sub_{i}", use_container_width=True):
                     st.session_state.calendar_df = h["data"]
+                    save_all_data_to_cloud()
                     st.rerun()
             with col_del:
                 if st.button("🗑️ 削除", key=f"hist_del_cal_sub_{i}", use_container_width=True):
@@ -397,6 +471,7 @@ elif st.session_state.current_page == "settings_calendars":
                         temp_df = pd.concat([st.session_state.calendar_df, new_df], ignore_index=True)
                         temp_df["順番"] = range(1, len(temp_df) + 1)
                         st.session_state.calendar_df = temp_df
+                        save_all_data_to_cloud()
                         st.success(f"✅ {len(new_rows)}件のカレンダーをインポートしました！")
                         st.rerun()
                     else:
@@ -435,6 +510,7 @@ elif st.session_state.current_page == "settings_stations":
                 save_to_history()
                 st.session_state.station_df = st.session_state.station_df.drop(idx).reset_index(drop=True)
                 st.session_state.station_df["順番"] = range(1, len(st.session_state.station_df) + 1)
+                save_all_data_to_cloud()
                 st.rerun()
     st.divider()
     st.subheader("💡 新しい駅を追加")
@@ -449,6 +525,7 @@ elif st.session_state.current_page == "settings_stations":
             with col_res:
                 if st.button("⏪ 復元", key=f"hist_res_sub_{i}", use_container_width=True):
                     st.session_state.station_df = h["data"]
+                    save_all_data_to_cloud()
                     st.rerun()
             with col_del:
                 if st.button("🗑️ 削除", key=f"hist_del_sub_{i}", use_container_width=True):
@@ -470,6 +547,7 @@ elif st.session_state.current_page == "settings_presets":
         with c3:
             if st.button("🗑️ 削除", key=f"del_preset_sub_{i}", use_container_width=True):
                 st.session_state.walk_presets.pop(i)
+                save_all_data_to_cloud()
                 st.rerun()
     st.divider()
     st.subheader("💡 新しいボタンを追加")
@@ -486,14 +564,14 @@ elif st.session_state.current_page == "settings_presets":
 # ------------------------------------------
 elif st.session_state.current_page == "main":
 
-    col_title, col_settings = st.columns([4, 1], vertical_alignment="center")
+    col_title, col_settings = st.columns([3, 1], vertical_alignment="center")
     with col_title: st.title("🗓 移動ルーター")
     with col_settings: st.button("⚙️ 設定", on_click=go_to_settings, use_container_width=True)
 
     st.write(f"現在の設定時刻: **{now_with_tz.strftime('%Y/%m/%d %H:%M:%S')}** ({st.session_state.app_timezone})")
 
     main_cal_idx = get_safe_cal_idx("cal_sel_main", st.session_state.calendar_df)
-    main_cal_id = st.session_state.calendar_df.iloc[main_cal_idx]['カレンダーID']
+    main_cal_id = st.session_state.calendar_df.iloc[main_cal_idx]['カレンダーID'] if not st.session_state.calendar_df.empty else 'primary'
     if main_cal_id == 'primary':
         cal_target_url = "https://calendar.google.com/calendar/r"
     else:
@@ -501,7 +579,10 @@ elif st.session_state.current_page == "main":
 
     btn_label_step5 = f"📅 カレンダーを確認 ({st.session_state.linked_email})" if st.session_state.linked_email else "📅 カレンダーを確認"
     st.link_button(btn_label_step5, cal_target_url, use_container_width=True)
-    if st.session_state.linked_email:
+    
+    if st.session_state.linked_email == "※要・再連携":
+        st.error("⚠️ 権限エラー：右上の「⚙️ 設定」から一度連携を解除し、再度ログインし直してください。")
+    elif st.session_state.linked_email:
         st.caption("※違うアカウントが開く場合は、ブラウザ右上のアイコンから連携中のアカウントに切り替えてください。")
 
 
@@ -863,17 +944,15 @@ elif st.session_state.current_page == "main":
                 st.error(f"❌ 登録失敗: {e}")
 
     st.link_button(btn_label_step5, cal_target_url, use_container_width=True)
-    if st.session_state.linked_email:
-        st.caption("※違うアカウントが開く場合は、ブラウザ右上のアイコンから連携中のアカウントに切り替えてください。")
 
     st.write("---")
     st.write("▼ 登録オプション")
     if travel_mode == "🚃 電車を利用する":
         st.caption("電車の乗車時間をカレンダーに登録したくない場合はOFFにしてください。")
-        st.toggle("🚃 電車の乗車時間も登録する", key="include_train_event")
+        st.toggle("🚃 電車の乗車時間も登録する", key="include_train_event_widget", value=st.session_state.include_train_event, on_change=update_toggle_state, args=("include_train_event",))
         
     st.caption("目標到着時刻と予定開始時刻の間に隙間がある場合、待機時間として登録します。")
-    st.toggle("⏳ 待機（バッファ）時間を登録する", key="include_buffer_event")
+    st.toggle("⏳ 待機（バッファ）時間を登録する", key="include_buffer_event_widget", value=st.session_state.include_buffer_event, on_change=update_toggle_state, args=("include_buffer_event",))
 
     st.write("---")
     st.write("▼ 本番の予定の登録先カレンダー")

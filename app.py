@@ -23,28 +23,41 @@ from streamlit_js_eval import streamlit_js_eval
 # ==========================================
 # 0. システム設定（タイムゾーンとCSS）
 # ==========================================
-st.set_page_config(page_title="スケジュール＆移動ルーター", layout="centered")
+st.set_page_config(page_title="スケジューリングツール", layout="centered")
 
 st.markdown("""
 <style>
+/* テキスト入力・数値入力のスタイル */
 div[data-baseweb="input"] input {
     text-align: center;
     font-size: 18px;
     font-weight: bold;
 }
+/* メニューボタンのスタイル */
 .menu-button button {
     justify-content: flex-start !important;
+}
+/* セレクトボックスの文字装飾 */
+div[data-baseweb="select"] > div {
+    font-size: 18px !important;
+    font-weight: bold !important;
+}
+ul[data-baseweb="menu"] li {
+    font-size: 16px !important;
+}
+/* ▼▼▼ 追加：ボタン内の文字を太字にする ▼▼▼ */
+button p {
+    font-weight: bold !important;
 }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 【バグ修正】見えない改行コードを完全除去する安全な読み込み関数
+# 見えない改行コードを完全除去する安全な読み込み関数
 # ==========================================
 def get_clean_secret(key):
     """Secretsから値を読み込み、改行や余計な空白を強制的に完全に削除する"""
     if key in st.secrets:
-        # \n (改行) や \r (キャリッジリターン) を完全に空文字に置き換え、前後の空白も削る
         return st.secrets[key].replace("\n", "").replace("\r", "").strip()
     return None
 
@@ -158,7 +171,7 @@ if "data_loaded" not in st.session_state:
     else:
         st.session_state.walk_presets = [{"name": "井細田", "time": 5}, {"name": "足柄", "time": 15}, {"name": "小田原", "time": 28}]
         st.session_state.station_df = pd.DataFrame([{"順番": 1, "出発駅名": "井細田"}, {"順番": 2, "出発駅名": "足柄(神奈川県)"}, {"順番": 3, "出発駅名": "小田原"}])
-        st.session_state.calendar_df = pd.DataFrame([{"順番": 1, "カレンダー名": "メインカレンダー", "カレンダーID": "primary"}])
+        st.session_state.calendar_df = pd.DataFrame([{"順番": 1, "カレンダー名": "主要スケジュール", "カレンダーID": "primary"}])
         st.session_state.cal_sel_prep = 0; st.session_state.cal_sel_walk1 = 0; st.session_state.cal_sel_train = 0
         st.session_state.cal_sel_walk2 = 0; st.session_state.cal_sel_buffer = 0; st.session_state.cal_sel_main = 0
         st.session_state.include_train_event = True; st.session_state.include_buffer_event = True
@@ -185,8 +198,8 @@ if not st.session_state.email_fetched and not st.session_state.force_logout:
         if st.session_state.google_creds is not None:
             creds = Credentials.from_authorized_user_info(json.loads(st.session_state.google_creds), SCOPES)
         elif "GOOGLE_TOKEN_JSON" in st.secrets:
-            # こちらも念のため、余計な文字列操作の前に安全に読み込む
-            creds = Credentials.from_authorized_user_info(json.loads(st.secrets["GOOGLE_TOKEN_JSON"].strip()), SCOPES)
+            clean_json_str = st.secrets["GOOGLE_TOKEN_JSON"].strip()
+            creds = Credentials.from_authorized_user_info(json.loads(clean_json_str), SCOPES)
         elif os.path.exists('token.json'):
             creds = Credentials.from_authorized_user_file('token.json', SCOPES)
             
@@ -223,7 +236,7 @@ def save_to_history():
 def update_cal_sel(state_key, widget_key):
     selected_val = st.session_state[widget_key]
     cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
-    if not cal_options_display: cal_options_display = ["メインカレンダー"]
+    if not cal_options_display: cal_options_display = ["主要スケジュール"]
     try: st.session_state[state_key] = cal_options_display.index(selected_val)
     except ValueError: st.session_state[state_key] = 0
     save_all_data_to_cloud()
@@ -343,7 +356,7 @@ if st.session_state.current_page == "settings":
                 auth_method = "📱 このブラウザで連携されています（一時的）"
             elif "GOOGLE_TOKEN_JSON" in st.secrets:
                 is_authenticated = True
-                auth_method = "☁️ クラウドのシークレットで連携されています（本番用優先）"
+                auth_method = "☁️ クラウドのシークレットで連携されています（主要スケジュール用優先）"
             elif os.path.exists('token.json'):
                 is_authenticated = True
                 auth_method = "💻 ローカルファイルで連携されています（開発用）"
@@ -409,7 +422,7 @@ if st.session_state.current_page == "settings":
     st.markdown('<div class="menu-button">', unsafe_allow_html=True)
     st.button("📅 登録先カレンダーの管理  ＞", on_click=go_to_settings_calendars, use_container_width=True)
     st.button("🚉 出発駅リストの管理  ＞", on_click=go_to_settings_stations, use_container_width=True)
-    st.button("🏠 徒歩時間ワンタッチボタンの管理  ＞", on_click=go_to_settings_presets, use_container_width=True)
+    st.button("🏠 移動時間ワンタッチボタンの管理  ＞", on_click=go_to_settings_presets, use_container_width=True)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # ------------------------------------------
@@ -520,7 +533,7 @@ elif st.session_state.current_page == "settings_calendars":
     st.subheader("⚙️ 工程ごとの登録先カレンダー設定")
     st.caption("各予定をどのカレンダーに振り分けるかのデフォルトを設定します。")
     cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
-    if not cal_options_display: cal_options_display = ["メインカレンダー"]
+    if not cal_options_display: cal_options_display = ["主要スケジュール"]
 
     with st.container(border=True):
         st.selectbox("① 🏠 準備", cal_options_display, index=get_safe_cal_idx("cal_sel_prep", cal_options_display), key="cal_sel_prep_widget_set", on_change=update_cal_sel, args=("cal_sel_prep", "cal_sel_prep_widget_set"))
@@ -528,7 +541,7 @@ elif st.session_state.current_page == "settings_calendars":
         st.selectbox("③ 🚃 電車（出発駅～到着駅）", cal_options_display, index=get_safe_cal_idx("cal_sel_train", cal_options_display), key="cal_sel_train_widget_set", on_change=update_cal_sel, args=("cal_sel_train", "cal_sel_train_widget_set"))
         st.selectbox("④ 🚶 到着駅～目的地", cal_options_display, index=get_safe_cal_idx("cal_sel_walk2", cal_options_display), key="cal_sel_walk2_widget_set", on_change=update_cal_sel, args=("cal_sel_walk2", "cal_sel_walk2_widget_set"))
         st.selectbox("⑤ ⏳ 待機（バッファ）", cal_options_display, index=get_safe_cal_idx("cal_sel_buffer", cal_options_display), key="cal_sel_buffer_widget_set", on_change=update_cal_sel, args=("cal_sel_buffer", "cal_sel_buffer_widget_set"))
-        st.selectbox("⑥ 🎯 本番の予定", cal_options_display, index=get_safe_cal_idx("cal_sel_main", cal_options_display), key="cal_sel_main_widget_set", on_change=update_cal_sel, args=("cal_sel_main", "cal_sel_main_widget_set"))
+        st.selectbox("⑥ 🎯 主要スケジュール", cal_options_display, index=get_safe_cal_idx("cal_sel_main", cal_options_display), key="cal_sel_main_widget_set", on_change=update_cal_sel, args=("cal_sel_main", "cal_sel_main_widget_set"))
 
 # ------------------------------------------
 # A-3. 個別設定画面（出発駅リストの管理）
@@ -569,11 +582,11 @@ elif st.session_state.current_page == "settings_stations":
             st.write("")
 
 # ------------------------------------------
-# A-4. 個別設定画面（徒歩時間ワンタッチボタンの管理）
+# A-4. 個別設定画面（移動時間ワンタッチボタンの管理）
 # ------------------------------------------
 elif st.session_state.current_page == "settings_presets":
     st.button("◀️ 管理メニューに戻る", on_click=go_to_settings, type="secondary", use_container_width=True)
-    st.title("🏠 徒歩時間ボタンの管理")
+    st.title("🏠 移動時間ボタンの管理")
     st.write("---")
     for i, preset in enumerate(st.session_state.walk_presets):
         c1, c2, c3 = st.columns([3, 2, 2], vertical_alignment="center")
@@ -600,7 +613,7 @@ elif st.session_state.current_page == "settings_presets":
 elif st.session_state.current_page == "main":
 
     col_title, col_settings = st.columns([3, 1], vertical_alignment="center")
-    with col_title: st.title("🗓 移動ルーター")
+    with col_title: st.title("🗓 スケジューリング")
     with col_settings: st.button("⚙️ 設定", on_click=go_to_settings, use_container_width=True)
 
     st.write(f"現在の設定時刻: **{now_with_tz.strftime('%Y/%m/%d %H:%M:%S')}** ({st.session_state.app_timezone})")
@@ -660,14 +673,14 @@ elif st.session_state.current_page == "main":
     # ==========================================
     # STEP 1: 予定開始時間と目的地の設定
     # ==========================================
-    st.header("1. 予定と目的地の設定")
+    st.header("予定と目的地の設定")
 
-    event_title = st.text_input("予定のタイトル", "")
-    facility_name = st.text_input("施設名（目的地）", "")
+    event_title = st.text_input("**予定のタイトル**", "")
+    facility_name = st.text_input("**目的地(施設名)**", "")
     if facility_name:
         st.link_button(f"🗺️ 「{facility_name}」をGoogleマップで探す", f"https://www.google.com/maps/search/?api=1&query={urllib.parse.quote(facility_name)}")
 
-    event_address_full = st.text_input("目的地住所（ビル・マンション名まで含む）", "")
+    event_address_full = st.text_input("**目的地住所（ビル・マンション名まで含む）**", "")
     cleaned_address = clean_address(event_address_full)
     full_destination_target = f"{facility_name} {event_address_full}".strip()
 
@@ -678,7 +691,7 @@ elif st.session_state.current_page == "main":
         components.iframe(f"https://www.google.com/maps?q={urllib.parse.quote(search_destination)}&output=embed", height=350, scrolling=True)
 
     st.write("---")
-    event_date = st.date_input("予定の日付", datetime.today())
+    event_date = st.date_input("**予定の日付**", datetime.today())
 
     if "start_h" not in st.session_state: st.session_state.start_h = now_with_tz.strftime("%H"); st.session_state.input_start_h = st.session_state.start_h
     if "start_m" not in st.session_state: st.session_state.start_m = now_with_tz.strftime("%M"); st.session_state.input_start_m = st.session_state.start_m
@@ -707,9 +720,18 @@ elif st.session_state.current_page == "main":
     end_time = time(int(st.session_state.end_h), int(st.session_state.end_m))
 
     st.write("---")
-    arrival_buffer_option = st.selectbox("予定開始の何分前に到着しますか？", ["5分前", "10分前", "15分前", "20分前", "自由入力（分）"], index=1)
+    # 1. 独立したテキストとして、大きく見やすい文字（20px程度）を配置する
+    st.markdown('<p style="font-size: 16px; font-weight: bold; margin-bottom: 5px;">予定開始の何分前に到着しますか？</p>', unsafe_allow_html=True)
+    
+    # 2. セレクトボックスのラベルは隠し（collapsed）、メニューだけを表示する
+    arrival_buffer_option = st.selectbox(
+        "",  # ラベルは空っぽにする
+        ["5分前", "10分前", "15分前", "20分前", "自由入力（分）"], 
+        index=1,
+        label_visibility="collapsed" # 透明な隙間を消す
+    )
+    
     buffer_minutes = st.number_input("到着バッファ（分）", value=30, min_value=0, step=1) if arrival_buffer_option == "自由入力（分）" else int(re.search(r'\d+', arrival_buffer_option).group())
-
     event_dt = datetime.combine(event_date, start_time)
     target_arrival_dt = event_dt - timedelta(minutes=buffer_minutes)
     st.info(f"💡 目標到着時刻: **{target_arrival_dt.strftime('%H:%M')}**")
@@ -718,7 +740,7 @@ elif st.session_state.current_page == "main":
     # 移動モードの選択
     # ==========================================
     st.write("---")
-    st.write("▼ 🚶 移動手段の選択")
+    st.header("▼ 🚶 移動手段の選択")
     if "travel_mode" not in st.session_state: st.session_state.travel_mode = "🚃 電車を利用する"
 
     c1, c2 = st.columns(2)
@@ -726,8 +748,8 @@ elif st.session_state.current_page == "main":
         if st.button("🚃 電車を利用する", use_container_width=True, type="primary" if st.session_state.travel_mode == "🚃 電車を利用する" else "secondary"):
             st.session_state.travel_mode = "🚃 電車を利用する"; st.rerun()
     with c2:
-        if st.button("🚶 徒歩のみ（近場）", use_container_width=True, type="primary" if st.session_state.travel_mode == "🚶 徒歩のみ" else "secondary"):
-            st.session_state.travel_mode = "🚶 徒歩のみ"; st.rerun()
+        if st.button("🚶 徒歩か自転車", use_container_width=True, type="primary" if st.session_state.travel_mode == "🚶 徒歩か自転車" else "secondary"):
+            st.session_state.travel_mode = "🚶 徒歩か自転車"; st.rerun()
 
     travel_mode = st.session_state.travel_mode
     train_depart_time = None; train_arrive_time = None; depart_station = ""; walk_to_dest = 0
@@ -737,25 +759,25 @@ elif st.session_state.current_page == "main":
     # STEP 2 & 3
     # ==========================================
     if travel_mode == "🚃 電車を利用する":
-        with st.expander("🚃 STEP 2: 降車駅の検索と徒歩計算", expanded=True):
+        with st.expander("🚃 降車駅の検索と目的地までの移動時間の計算", expanded=True):
             if search_destination:
                 around_target = cleaned_address if cleaned_address else facility_name
                 st.write("▼ 🚉 周辺の駅を探す")
                 st.link_button("🔍 地図を開いて周辺の駅を探す", f"https://www.google.com/maps/search/{urllib.parse.quote('周辺の駅 around:'+around_target)}", use_container_width=True)
 
-            st.write("▼ 🚉 目的地の近隣駅を入力")
-            st.text_input("地図を確認して近隣駅（降車駅）を入力してください", key="arrival_station_input")
+            st.write("**▼ 🚉 目的地付近の降車駅を入力**")
+            st.text_input("地図を確認して降車駅を入力してください", key="arrival_station_input")
             current_arrival_station = st.session_state.arrival_station_input
 
             if current_arrival_station and search_destination:
                 clean_sta = re.sub(r'駅$', '', current_arrival_station)
                 st.link_button(f"🚶‍♂️ {clean_sta}駅から目的地までのルートを確認", f"https://www.google.com/maps/dir/?api=1&origin={urllib.parse.quote(clean_sta + '駅')}&destination={urllib.parse.quote(search_destination)}&travelmode=walking", use_container_width=True)
             elif current_arrival_station and not search_destination:
-                st.caption("※STEP 1で目的地を入力すると、ここから目的地までの徒歩ルート確認ボタンが表示されます。")
+                st.caption("※STEP 1で目的地を入力すると、ここから目的地までの移動ルート確認ボタンが表示されます。")
 
             st.write("---")
-            st.write(f"🚉 確定した駅: **{current_arrival_station if current_arrival_station else '（未入力）'}**")
-            walk_to_dest = st.number_input(f"駅から目的地までの徒歩時間（分）", value=5, step=1)
+            st.write(f"**🚉 降車する駅**: **{current_arrival_station if current_arrival_station else '（未入力）'}**")
+            walk_to_dest = st.number_input(f"駅から目的地までの移動時間（分）", value=5, step=1)
             train_deadline_dt = target_arrival_dt - timedelta(minutes=walk_to_dest)
             
             display_sta = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else "〇〇"
@@ -766,7 +788,7 @@ elif st.session_state.current_page == "main":
         if "selected_depart_station" not in st.session_state or st.session_state.selected_depart_station not in valid_stations:
             st.session_state.selected_depart_station = valid_stations[0]
 
-        with st.expander("🔍 出発駅を探す・追加・全リスト", expanded=False):
+        with st.expander("🔍 出発駅を探す・追加・リスト選択", expanded=False):
             st.write("▼ 📍 現在地から出発駅を探す")
             if st.toggle("🌍 GPSを起動して現在地を取得する", value=False):
                 loc = streamlit_js_eval(js_expressions="new Promise((res, rej) => { navigator.geolocation.getCurrentPosition((p) => { res({lat: p.coords.latitude, lng: p.coords.longitude}); }, (e) => { res({error: e.message}); }, {enableHighAccuracy: true, timeout: 10000, maximumAge: 0}); })", key="gps_promise_fetch")
@@ -788,7 +810,7 @@ elif st.session_state.current_page == "main":
             current_index = valid_stations.index(st.session_state.selected_depart_station) if st.session_state.selected_depart_station in valid_stations else 0
             st.selectbox("出発駅", valid_stations, index=current_index, key="sb_depart_station", on_change=update_depart_station_from_sb, label_visibility="collapsed")
 
-        with st.expander("🚃 STEP 3: ルート検索と電車の時刻入力", expanded=True):
+        with st.expander("🚃 電車ルート検索と発着時刻の入力", expanded=True):
             st.write("▼ 今回利用する出発駅を選択（ワンタッチ）")
             btn_stations = valid_stations[:6]
             cols = st.columns(3)
@@ -803,8 +825,31 @@ elif st.session_state.current_page == "main":
             
             st.write("---")
             st.write("▼ ジョルダン乗換案内でルートを検索")
-            st.link_button("↗️ ジョルダン乗換案内を開く", "https://www.jorudan.co.jp/norikae/cgi/nori.cgi?" + urllib.parse.urlencode(jorudan_params), use_container_width=True)
-
+            # 1. リンク先のURLを変数にまとめる
+            jorudan_url = "https://www.jorudan.co.jp/norikae/cgi/nori.cgi?" + urllib.parse.urlencode(jorudan_params)
+            # 2. HTMLとCSSを使って、ボタンそっくりのデザインを作る
+            custom_button_html = f"""
+            <a href="{jorudan_url}" target="_blank" style="
+                display: block;
+                width: 100%;
+                text-align: center;
+                padding: 0.5rem 1rem;
+                background-color: #f0f2f6; /* 標準ボタンと同じような薄いグレーの背景 */
+                color: #31333F; /* 文字の色（黒系） */
+                font-weight: bold; /* ★ここで確実に太字にする！ */
+                font-size: 16px;
+                text-decoration: none; /* リンク特有の下線を消す */
+                border-radius: 0.5rem; /* 角を丸くする */
+                border: 1px solid #d4d6dd; /* 枠線を引く */
+                margin-bottom: 1rem;
+                transition: background-color 0.2s;
+            ">
+                ↗️ ジョルダン乗換案内を開く
+            </a>
+            """
+            # 3. Streamlitの制限をすり抜けて画面に表示する
+            st.markdown(custom_button_html, unsafe_allow_html=True)
+            
             st.write("---")
             st.write("▼ 調べた電車の時刻を入力してください")
 
@@ -817,14 +862,14 @@ elif st.session_state.current_page == "main":
                 st.session_state.train_arr_h = st.session_state.train_dep_h; st.session_state.input_train_arr_h = st.session_state.train_dep_h
                 st.session_state.train_arr_m = st.session_state.train_dep_m; st.session_state.input_train_arr_m = st.session_state.train_dep_m
 
-            st.write("🚃 **確定した電車の 出発時刻**")
+            st.write("🚃 **電車の出発時刻**")
             with st.container(border=True):
                 c1, c2 = st.columns(2)
                 with c1: render_hybrid_time_picker("時", "train_dep_h", 24, sync_train_arrive_time)
                 with c2: render_hybrid_time_picker("分", "train_dep_m", 60, sync_train_arrive_time)
             train_depart_time = time(int(st.session_state.train_dep_h), int(st.session_state.train_dep_m))
 
-            st.write("🚃 **確定した電車の 到着時刻**")
+            st.write("🚃 **電車の到着時刻**")
             with st.container(border=True):
                 c1, c2 = st.columns(2)
                 with c1: render_hybrid_time_picker("時", "train_arr_h", 24)
@@ -834,9 +879,9 @@ elif st.session_state.current_page == "main":
     # ==========================================
     # STEP 4: 出発前の準備
     # ==========================================
-    st.header("4. 出発前の準備")
+    st.header("出発前の準備")
     st.write("---")
-    st.write("▼ 🏠 自宅からの徒歩時間（ワンタッチ入力）")
+    st.write("▼ 🏠 現在地からの移動時間（ワンタッチ入力）")
 
     cols = st.columns(3)
     for i, preset in enumerate(st.session_state.walk_presets):
@@ -856,12 +901,12 @@ elif st.session_state.current_page == "main":
     st.write("---")
 
     if travel_mode == "🚃 電車を利用する":
-        walk_to_station = st.number_input("現在地から【利用する出発駅】までの徒歩時間（分）", key="walk_time_train", step=1)
+        walk_to_station = st.number_input("現在地から【利用する出発駅】までの移動時間（分）", key="walk_time_train", step=1)
         prep_time = st.number_input("移動前の準備（仕度）時間（分）", value=15, step=1, key="prep_time_train")
         leave_home_dt = datetime.combine(event_date, train_depart_time) - timedelta(minutes=walk_to_station)
         start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
     else:
-        st.write("▼ 🗺️ 目的地までの徒歩ルートと時間を確認")
+        st.write("▼ 🗺️ 目的地までのルートと時間を確認")
         if st.toggle("🌍 GPSを起動して現在地を取得する", key="use_gps_walk", value=False):
             loc_walk = streamlit_js_eval(js_expressions="new Promise((res, rej) => { navigator.geolocation.getCurrentPosition((p) => { res({lat: p.coords.latitude, lng: p.coords.longitude}); }, (e) => { res({error: e.message}); }, {enableHighAccuracy: true, timeout: 10000, maximumAge: 0}); })", key="gps_promise_fetch_walk")
             if loc_walk:
@@ -869,20 +914,20 @@ elif st.session_state.current_page == "main":
                 else:
                     st.success("✅ 位置情報の取得に成功しました！")
                     if search_destination:
-                        st.link_button("🚶‍♂️ 取得した現在地からの徒歩ルートを確認", f"https://www.google.com/maps/dir/?api=1&origin={loc_walk['lat']},{loc_walk['lng']}&destination={urllib.parse.quote(search_destination)}&travelmode=walking", use_container_width=True)
+                        st.link_button("🚶‍♂️ 取得した現在地からの移動ルートを確認", f"https://www.google.com/maps/dir/?api=1&origin={loc_walk['lat']},{loc_walk['lng']}&destination={urllib.parse.quote(search_destination)}&travelmode=walking", use_container_width=True)
                     else: st.warning("目的地が入力されていません。")
             else: st.info("⌛ 位置情報を取得中...")
         else:
             if search_destination:
-                st.link_button("🚶‍♂️ 現在地から目的地までの徒歩ルートを確認", f"https://www.google.com/maps/dir/?api=1&destination={urllib.parse.quote(search_destination)}&travelmode=walking", use_container_width=True)
+                st.link_button("🚶‍♂️ 現在地から目的地までの移動ルートを確認", f"https://www.google.com/maps/dir/?api=1&destination={urllib.parse.quote(search_destination)}&travelmode=walking", use_container_width=True)
             else: st.warning("目的地が入力されていません。")
             
-        walk_to_dest_direct = st.number_input("現在地から【目的地】までの総徒歩時間（分）", key="walk_time_direct", step=1)
+        walk_to_dest_direct = st.number_input("現在地から【目的地】までの移動時間（分）", key="walk_time_direct", step=1)
         prep_time = st.number_input("移動前の準備（仕度）時間（分）", value=15, step=1, key="prep_time_direct")
         leave_home_dt = target_arrival_dt - timedelta(minutes=walk_to_dest_direct)
         start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
 
-    st.info(f"🏁 **目標到着時刻: {target_arrival_dt.strftime('%H:%M')}**")
+    st.info(f"💡 **目標到着時刻: {target_arrival_dt.strftime('%H:%M')}**")
     st.error(f"🏠 **準備開始時刻: {start_prep_dt.strftime('%H:%M')}**")
     st.warning(f"🚶 **出発時刻: {leave_home_dt.strftime('%H:%M')}**")
 
@@ -890,10 +935,10 @@ elif st.session_state.current_page == "main":
     # ==========================================
     # STEP 5: カレンダー登録
     # ==========================================
-    st.header("5. カレンダー登録")
+    st.header("カレンダー登録")
 
     cal_options_display = [f"{row['カレンダー名']}" for idx, row in st.session_state.calendar_df.iterrows()]
-    if not cal_options_display: cal_options_display = ["メインカレンダー"]
+    if not cal_options_display: cal_options_display = ["主要スケジュール"]
 
     if st.button("📅 カレンダーに登録", type="primary", use_container_width=True):
         try:
@@ -905,8 +950,7 @@ elif st.session_state.current_page == "main":
                     if st.session_state.google_creds is not None:
                         creds = Credentials.from_authorized_user_info(json.loads(st.session_state.google_creds), SCOPES)
                     elif "GOOGLE_TOKEN_JSON" in st.secrets:
-                        # 念のため、JSON文字列もクリーンにしてからロードする
-                        clean_json_str = st.secrets["GOOGLE_TOKEN_JSON"].strip()
+                        clean_json_str = st.secrets["GOOGLE_TOKEN_JSON"].replace("\n", "").replace("\r", "").strip()
                         creds = Credentials.from_authorized_user_info(json.loads(clean_json_str), SCOPES)
                     elif os.path.exists('token.json'):
                         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
@@ -949,26 +993,26 @@ elif st.session_state.current_page == "main":
                     clean_arrival_sta_for_cal = re.sub(r'駅$', '', current_arrival_station) if current_arrival_station else ""
 
                     insert_event_with_duration(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt, id_prep)
-                    insert_event_with_duration(f"🚶 徒歩（自宅〜{depart_station}駅）：{event_title}", leave_home_dt, datetime.combine(event_date, train_depart_time), id_walk1)
+                    insert_event_with_duration(f"🚶 移動（自宅〜{depart_station}駅）：{event_title}", leave_home_dt, datetime.combine(event_date, train_depart_time), id_walk1)
                     if inc_train:
                         insert_event_with_duration(f"🚃 電車（{depart_station}駅〜{clean_arrival_sta_for_cal}駅）：{event_title}", datetime.combine(event_date, train_depart_time), train_arrive_dt, id_train)
-                    insert_event_with_duration(f"🚶 徒歩（{clean_arrival_sta_for_cal}駅〜目的地）：{event_title}", train_arrive_dt, actual_arrive_dt, id_walk2)
+                    insert_event_with_duration(f"🚶 移動（{clean_arrival_sta_for_cal}駅〜目的地）：{event_title}", train_arrive_dt, actual_arrive_dt, id_walk2)
                     
                     if inc_buffer and (event_dt - actual_arrive_dt).total_seconds() > 60:
                         insert_event_with_duration(f"⏳ 待機（バッファ）：{event_title}", actual_arrive_dt, event_dt, id_buffer, location=full_destination_target)
                         
                     insert_event_with_duration(event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
-                    st.success("✅ 準備から移動の詳細、本番までを各カレンダーに登録しました！")
+                    st.success("✅ 準備から移動の詳細、主要スケジュールまでを各カレンダーに登録しました！")
 
                 else:
                     insert_event_with_duration(f"🏠 準備：{event_title}", start_prep_dt, leave_home_dt, id_prep)
-                    insert_event_with_duration(f"🚶 徒歩（出発地〜目的地）：{event_title}", leave_home_dt, target_arrival_dt, id_walk1)
+                    insert_event_with_duration(f"🚶 移動（出発地〜目的地）：{event_title}", leave_home_dt, target_arrival_dt, id_walk1)
                     
                     if inc_buffer and (event_dt - target_arrival_dt).total_seconds() > 60:
                         insert_event_with_duration(f"⏳ 待機（バッファ）：{event_title}", target_arrival_dt, event_dt, id_buffer, location=full_destination_target)
 
                     insert_event_with_duration(event_title, event_dt, datetime.combine(event_date, end_time), id_main, location=full_destination_target)
-                    st.success("✅ 準備、徒歩移動、本番の予定を各カレンダーに登録しました！")
+                    st.success("✅ 準備、移動、主要スケジュールを各カレンダーに登録しました！")
 
             st.balloons()
             
@@ -992,8 +1036,8 @@ elif st.session_state.current_page == "main":
     st.toggle("⏳ 待機（バッファ）時間を登録する", key="include_buffer_event_widget", value=st.session_state.include_buffer_event, on_change=update_toggle_state, args=("include_buffer_event",))
 
     st.write("---")
-    st.write("▼ 本番の予定の登録先カレンダー")
-    st.selectbox("🎯 本番の予定", cal_options_display, index=get_safe_cal_idx("cal_sel_main", cal_options_display), key="cal_sel_main_widget_main", on_change=update_cal_sel, args=("cal_sel_main", "cal_sel_main_widget_main"), label_visibility="collapsed")
+    st.write("▼ 主要スケジュールの登録先カレンダー")
+    st.selectbox("🎯 主要スケジュール", cal_options_display, index=get_safe_cal_idx("cal_sel_main", cal_options_display), key="cal_sel_main_widget_main", on_change=update_cal_sel, args=("cal_sel_main", "cal_sel_main_widget_main"), label_visibility="collapsed")
 
     with st.expander("➕ 新しいカレンダーを追加", expanded=False):
         st.caption("💡 新しいカレンダーを追加します。（リストの確認・削除や一括インポートは右上の「⚙️ 設定」メニューから）")

@@ -125,7 +125,6 @@ def save_all_data_to_cloud():
             "include_buffer_event": st.session_state.include_buffer_event,
             "app_timezone": st.session_state.app_timezone,
             "google_creds": st.session_state.get("google_creds", None),
-            # ▼変更：入力欄のキーではなく、保存専用(def_)のキーを保存する
             "def_walk_time_train": st.session_state.def_walk_time_train,
             "def_walk_time_direct": st.session_state.def_walk_time_direct,
             "def_prep_time_train": st.session_state.def_prep_time_train,
@@ -175,7 +174,6 @@ if "data_loaded" not in st.session_state:
         st.session_state.app_timezone = cloud_data.get("app_timezone", "Asia/Tokyo")
         st.session_state.google_creds = cloud_data.get("google_creds", None)
         
-        # ▼変更：保存専用(def_)のキーへ復元（過去のデータ名からの互換性も確保）
         st.session_state.def_walk_time_train = cloud_data.get("def_walk_time_train", cloud_data.get("walk_time_train", 10))
         st.session_state.def_walk_time_direct = cloud_data.get("def_walk_time_direct", cloud_data.get("walk_time_direct", 10))
         st.session_state.def_prep_time_train = cloud_data.get("def_prep_time_train", cloud_data.get("prep_time_train", 30))
@@ -270,7 +268,6 @@ def get_safe_cal_idx(state_key, options_list):
     return idx if 0 <= idx < len(options_list) else 0
 
 def set_walk_time_callback(mins):
-    # ▼変更：メイン画面の入力欄(main_)にワンタッチボタンの分数を適用する▼
     st.session_state.main_walk_time_train = mins
     st.session_state.main_walk_time_direct = mins
 
@@ -640,41 +637,40 @@ elif st.session_state.current_page == "settings_defaults":
     st.write("---")
     st.caption("メイン画面で最初に入力されている各時間のデフォルト値を変更・保存できます。")
 
-    # ▼変更：設定画面で変更された内容を、金庫(def_)とメイン画面(main_)の両方に書き込み同期する▼
-    def update_defaults():
-        # 金庫(def_)の更新
-        st.session_state.def_walk_time_direct = st.session_state.set_walk_time_direct
-        st.session_state.def_walk_time_train = st.session_state.set_walk_time_train
-        st.session_state.def_walk_to_dest = st.session_state.set_walk_to_dest
-        st.session_state.def_prep_time_train = st.session_state.set_prep_time_train
-        st.session_state.def_prep_time_direct = st.session_state.set_prep_time_direct
-        
-        # メイン画面(main_)の更新（即座に反映させるため）
-        st.session_state.main_walk_time_direct = st.session_state.def_walk_time_direct
-        st.session_state.main_walk_time_train = st.session_state.def_walk_time_train
-        st.session_state.main_walk_to_dest = st.session_state.def_walk_to_dest
-        st.session_state.main_prep_time_train = st.session_state.def_prep_time_train
-        st.session_state.main_prep_time_direct = st.session_state.def_prep_time_direct
-        
-        save_all_data_to_cloud()
-
+    # ▼変更：自動保存をやめて、変数で受け取るだけにする▼
     st.subheader("🚶 移動時間")
-    st.number_input("現在地から【目的地】までの移動時間（分）", min_value=0, step=1, value=st.session_state.def_walk_time_direct, key="set_walk_time_direct", on_change=update_defaults)
-    st.number_input("現在地から【利用する出発駅】までの移動時間（分）", min_value=0, step=1, value=st.session_state.def_walk_time_train, key="set_walk_time_train", on_change=update_defaults)
-    st.number_input("駅から目的地までの移動時間（分）", min_value=0, step=1, value=st.session_state.def_walk_to_dest, key="set_walk_to_dest", on_change=update_defaults)
+    new_walk_time_direct = st.number_input("現在地から【目的地】までの移動時間（分）", min_value=0, step=1, value=st.session_state.def_walk_time_direct)
+    new_walk_time_train = st.number_input("現在地から【利用する出発駅】までの移動時間（分）", min_value=0, step=1, value=st.session_state.def_walk_time_train)
+    new_walk_to_dest = st.number_input("駅から目的地までの移動時間（分）", min_value=0, step=1, value=st.session_state.def_walk_to_dest)
 
     st.divider()
     st.subheader("👜 準備時間")
-    st.number_input("移動前の準備（仕度）時間（分） ※電車利用時", min_value=0, step=1, value=st.session_state.def_prep_time_train, key="set_prep_time_train", on_change=update_defaults)
-    st.number_input("移動前の準備（仕度）時間（分） ※徒歩・自転車時", min_value=0, step=1, value=st.session_state.def_prep_time_direct, key="set_prep_time_direct", on_change=update_defaults)
+    new_prep_time_train = st.number_input("移動前の準備（仕度）時間（分） ※電車利用時", min_value=0, step=1, value=st.session_state.def_prep_time_train)
+    new_prep_time_direct = st.number_input("移動前の準備（仕度）時間（分） ※徒歩・自転車時", min_value=0, step=1, value=st.session_state.def_prep_time_direct)
 
+    st.write("---")
+    
+    # ▼追加：確実な保存ボタン。メインの古いメモリを強制削除する▼
+    if st.button("💾 設定を保存して反映する", type="primary", use_container_width=True):
+        st.session_state.def_walk_time_direct = new_walk_time_direct
+        st.session_state.def_walk_time_train = new_walk_time_train
+        st.session_state.def_walk_to_dest = new_walk_to_dest
+        st.session_state.def_prep_time_train = new_prep_time_train
+        st.session_state.def_prep_time_direct = new_prep_time_direct
+        
+        # リセットしてメイン画面で強制的に再読み込みさせる
+        for k in ["main_walk_time_direct", "main_walk_time_train", "main_walk_to_dest", "main_prep_time_train", "main_prep_time_direct"]:
+            if k in st.session_state:
+                del st.session_state[k]
+        
+        save_all_data_to_cloud()
+        st.success("✅ 保存しました！メイン画面に新しい初期値が反映されます。")
 
 # ------------------------------------------
 # B. メイン画面（スケジュール登録画面）
 # ------------------------------------------
 elif st.session_state.current_page == "main":
 
-    # ▼追加：メイン画面を開いた時、各入力欄が空っぽなら金庫(def_)から初期値を持ってくる処理▼
     if "main_walk_time_train" not in st.session_state: st.session_state.main_walk_time_train = st.session_state.def_walk_time_train
     if "main_walk_time_direct" not in st.session_state: st.session_state.main_walk_time_direct = st.session_state.def_walk_time_direct
     if "main_prep_time_train" not in st.session_state: st.session_state.main_prep_time_train = st.session_state.def_prep_time_train
@@ -789,15 +785,13 @@ elif st.session_state.current_page == "main":
     end_time = time(int(st.session_state.end_h), int(st.session_state.end_m))
 
     st.write("---")
-    # 1. 独立したテキストとして、大きく見やすい文字（20px程度）を配置する
     st.markdown('<p style="font-size: 16px; font-weight: bold; margin-bottom: 5px;">予定開始の何分前に到着しますか？</p>', unsafe_allow_html=True)
     
-    # 2. セレクトボックスのラベルは隠し（collapsed）、メニューだけを表示する
     arrival_buffer_option = st.selectbox(
-        "",  # ラベルは空っぽにする
+        "", 
         ["5分前", "10分前", "15分前", "20分前", "自由入力（分）"], 
         index=1,
-        label_visibility="collapsed" # 透明な隙間を消す
+        label_visibility="collapsed"
     )
     
     buffer_minutes = st.number_input("到着バッファ（分）", value=30, min_value=0, step=1) if arrival_buffer_option == "自由入力（分）" else int(re.search(r'\d+', arrival_buffer_option).group())
@@ -846,7 +840,7 @@ elif st.session_state.current_page == "main":
             st.write("---")
             st.write(f"**🚉 降車する駅**: **{current_arrival_station if current_arrival_station else '（未入力）'}**")
             st.write("---")
-            # ▼変更：メイン画面の入力欄(main_)を使う
+            
             walk_to_dest = st.number_input(f"**▼駅から目的地までの移動時間（分）**", key="main_walk_to_dest", step=1)
             train_deadline_dt = target_arrival_dt - timedelta(minutes=walk_to_dest)
             
@@ -949,11 +943,9 @@ elif st.session_state.current_page == "main":
 
     if travel_mode == "🚃 電車を利用する":
         st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼現在地から【利用する出発駅】までの移動時間（分）</p>', unsafe_allow_html=True)
-        # ▼変更：メイン画面の入力欄(main_)を使う
         walk_to_station = st.number_input("", key="main_walk_time_train", step=1, label_visibility="collapsed")
         st.write("---")
         st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼移動前の準備（仕度）時間（分）</p>', unsafe_allow_html=True)
-        # ▼変更：メイン画面の入力欄(main_)を使う
         prep_time = st.number_input("", step=1, key="main_prep_time_train", label_visibility="collapsed")
         leave_home_dt = datetime.combine(event_date, train_depart_time) - timedelta(minutes=walk_to_station)
         start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
@@ -976,12 +968,10 @@ elif st.session_state.current_page == "main":
             else: st.warning("**目的地が入力されていません。**")
             
         st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼現在地から【目的地】までの移動時間（分）</p>', unsafe_allow_html=True)
-        # ▼変更：メイン画面の入力欄(main_)を使う
         walk_to_dest_direct = st.number_input("", key="main_walk_time_direct", step=1, label_visibility="collapsed")
         
         st.write("---")
         st.markdown('<p style="font-size: 18px; font-weight: bold; margin-bottom: 5px;">▼移動前の準備（仕度）時間（分）</p>', unsafe_allow_html=True)
-        # ▼変更：メイン画面の入力欄(main_)を使う
         prep_time = st.number_input("", step=1, key="main_prep_time_direct", label_visibility="collapsed")
         leave_home_dt = target_arrival_dt - timedelta(minutes=walk_to_dest_direct)
         start_prep_dt = leave_home_dt - timedelta(minutes=prep_time)
